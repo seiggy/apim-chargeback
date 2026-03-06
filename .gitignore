@@ -1,0 +1,60 @@
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Dependency directories
+node_modules/
+bower_components/
+
+# Build artifacts
+dist/
+build/
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+*.class
+*.o
+*.so
+
+# Python virtual environments
+.venv/
+env/
+venv/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Azure deployment artifacts
+*.zip
+*.tar.gz
+*.bak
+*.swp
+
+# IDE/Editor settings
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Bicep cache
+*.bicep.cache
+
+# Azure CLI configuration
+.azure/
+
+# Deployment outputs
+infraOutputs.json
