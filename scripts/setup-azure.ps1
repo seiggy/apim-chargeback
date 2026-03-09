@@ -351,6 +351,23 @@ try {
     Write-Host "  Ensuring API enterprise application exists..." -ForegroundColor Gray
     Ensure-ServicePrincipal -AppId $apiAppId -DisplayName "Chargeback API"
 
+    # Allow Azure CLI to acquire tokens for this API (needed by Phase 9 setup calls)
+    Write-Host "  Ensuring Azure CLI is a known client application..." -ForegroundColor Gray
+    $azureCliAppId = "04b07795-ee44-4aec-8b98-a9b01e0e3d44"
+    $knownClients = az ad app show --id $apiAppId --query "api.knownClientApplications" -o json 2>$null | ConvertFrom-Json
+    if (-not $knownClients) { $knownClients = @() }
+    if ($knownClients -notcontains $azureCliAppId) {
+        $knownClients = @($knownClients) + @($azureCliAppId)
+        $kcBody = @{ api = @{ knownClientApplications = $knownClients } } | ConvertTo-Json -Depth 3 -Compress
+        $kcFile = Join-Path $env:TEMP "known-clients.json"
+        [System.IO.File]::WriteAllText($kcFile, $kcBody, [System.Text.UTF8Encoding]::new($false))
+        az rest --method PATCH --uri "https://graph.microsoft.com/v1.0/applications/$apiObjId" --headers "Content-Type=application/json" --body "@$kcFile" -o none
+        Remove-Item $kcFile -ErrorAction SilentlyContinue
+        Write-Host "    ✓ Azure CLI added to knownClientApplications" -ForegroundColor Green
+    } else {
+        Write-Host "    ✓ Azure CLI already in knownClientApplications" -ForegroundColor Green
+    }
+
     # Ensure Chargeback.Export app role exists on the API app
     Write-Host "  Ensuring 'Chargeback.Export' app role..." -ForegroundColor Gray
     $existingExportRole = az ad app show --id $apiAppId --query "appRoles[?value=='Chargeback.Export'] | [0].id" -o tsv 2>$null
@@ -1009,6 +1026,15 @@ Write-Host "━━━━━━━━━━━━━━━━━━━━━━�
 try {
     $baseUrl = "https://$containerAppUrl"
 
+    # Acquire an access token for the current user (who has Chargeback.Admin role)
+    Write-Host "  Acquiring access token for Container App API..." -ForegroundColor Gray
+    $accessToken = az account get-access-token --resource "api://$apiAppId" --query "accessToken" -o tsv 2>$null
+    if ([string]::IsNullOrWhiteSpace($accessToken)) {
+        throw "Failed to acquire access token for api://$apiAppId. Ensure the current user has the Chargeback.Admin role assigned."
+    }
+    $authHeaders = @{ Authorization = "Bearer $accessToken" }
+    Write-Host "    ✓ Access token acquired" -ForegroundColor Green
+
     # Wait for Container App to be responsive
     Write-Host "  Waiting for Container App to be ready..." -ForegroundColor Gray
     $maxRetries = 12
@@ -1016,7 +1042,7 @@ try {
     $ready = $false
     while (-not $ready -and $retryCount -lt $maxRetries) {
         try {
-            $healthCheck = Invoke-RestMethod -Uri "$baseUrl/api/plans" -Method Get -TimeoutSec 10 -ErrorAction Stop
+            $healthCheck = Invoke-RestMethod -Uri "$baseUrl/api/plans" -Method Get -Headers $authHeaders -TimeoutSec 10 -ErrorAction Stop
             $ready = $true
         } catch {
             $retryCount++
@@ -1027,7 +1053,7 @@ try {
     if (-not $ready) { throw "Container App not responding after $maxRetries attempts." }
     Write-Host "    ✓ Container App is ready" -ForegroundColor Green
 
-    $plansResponse = Invoke-RestMethod -Uri "$baseUrl/api/plans" -Method Get -TimeoutSec 15
+    $plansResponse = Invoke-RestMethod -Uri "$baseUrl/api/plans" -Method Get -Headers $authHeaders -TimeoutSec 15
     $existingPlans = @($plansResponse.plans)
 
     # Ensure Enterprise plan
@@ -1047,10 +1073,10 @@ try {
     }
     $enterprisePlan = $enterprisePlans | Select-Object -First 1
     if ($enterprisePlan) {
-        $entPlan = Invoke-RestMethod -Uri "$baseUrl/api/plans/$($enterprisePlan.id)" -Method Put -Body $entPlanBody -ContentType "application/json"
+        $entPlan = Invoke-RestMethod -Uri "$baseUrl/api/plans/$($enterprisePlan.id)" -Method Put -Body $entPlanBody -ContentType "application/json" -Headers $authHeaders
         Write-Host "    ✓ Enterprise plan updated (ID: $($entPlan.id))" -ForegroundColor Green
     } else {
-        $entPlan = Invoke-RestMethod -Uri "$baseUrl/api/plans" -Method Post -Body $entPlanBody -ContentType "application/json"
+        $entPlan = Invoke-RestMethod -Uri "$baseUrl/api/plans" -Method Post -Body $entPlanBody -ContentType "application/json" -Headers $authHeaders
         Write-Host "    ✓ Enterprise plan created (ID: $($entPlan.id))" -ForegroundColor Green
     }
 
@@ -1071,21 +1097,21 @@ try {
     }
     $starterPlan = $starterPlans | Select-Object -First 1
     if ($starterPlan) {
-        $startPlan = Invoke-RestMethod -Uri "$baseUrl/api/plans/$($starterPlan.id)" -Method Put -Body $startPlanBody -ContentType "application/json"
+        $startPlan = Invoke-RestMethod -Uri "$baseUrl/api/plans/$($starterPlan.id)" -Method Put -Body $startPlanBody -ContentType "application/json" -Headers $authHeaders
         Write-Host "    ✓ Starter plan updated (ID: $($startPlan.id))" -ForegroundColor Green
     } else {
-        $startPlan = Invoke-RestMethod -Uri "$baseUrl/api/plans" -Method Post -Body $startPlanBody -ContentType "application/json"
+        $startPlan = Invoke-RestMethod -Uri "$baseUrl/api/plans" -Method Post -Body $startPlanBody -ContentType "application/json" -Headers $authHeaders
         Write-Host "    ✓ Starter plan created (ID: $($startPlan.id))" -ForegroundColor Green
     }
 
     # Assign clients to plans
     Write-Host "  Assigning clients to plans..." -ForegroundColor Gray
     $client1Body = @{ planId = $entPlan.id; displayName = "Chargeback Sample Client" } | ConvertTo-Json
-    Invoke-RestMethod -Uri "$baseUrl/api/clients/$client1AppId" -Method Put -Body $client1Body -ContentType "application/json" | Out-Null
+    Invoke-RestMethod -Uri "$baseUrl/api/clients/$client1AppId" -Method Put -Body $client1Body -ContentType "application/json" -Headers $authHeaders | Out-Null
     Write-Host "    ✓ Client 1 → Enterprise plan" -ForegroundColor Green
 
     $client2Body = @{ planId = $startPlan.id; displayName = "Chargeback Demo Client 2" } | ConvertTo-Json
-    Invoke-RestMethod -Uri "$baseUrl/api/clients/$client2AppId" -Method Put -Body $client2Body -ContentType "application/json" | Out-Null
+    Invoke-RestMethod -Uri "$baseUrl/api/clients/$client2AppId" -Method Put -Body $client2Body -ContentType "application/json" -Headers $authHeaders | Out-Null
     Write-Host "    ✓ Client 2 → Starter plan" -ForegroundColor Green
 
     $deploymentOutput["enterprisePlanId"] = $entPlan.id
