@@ -2,6 +2,9 @@
 # Deployment outputs (may contain secrets)
 deployment-output.json
 
+# Environment-specific deployment parameters (copy parameter.sample.json to parameter.json)
+infra/parameter.json
+
 # Logs
 *.log
 logs/
