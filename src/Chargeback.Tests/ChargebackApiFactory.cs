@@ -1,16 +1,52 @@
+using System.Security.Claims;
+using System.Text.Encodings.Web;
 using System.Threading.Channels;
 using Chargeback.Api.Models;
 using Chargeback.Api.Services;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Azure.Cosmos;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using NSubstitute;
 using StackExchange.Redis;
 
 namespace Chargeback.Tests;
+
+/// <summary>
+/// Test authentication handler that authenticates requests carrying an Authorization header.
+/// Requests without the header are treated as anonymous (returns NoResult), allowing
+/// tests like "WithoutAuth_ReturnsUnauthorized" to continue working.
+/// </summary>
+internal sealed class TestAuthHandler : AuthenticationHandler<AuthenticationSchemeOptions>
+{
+    public TestAuthHandler(
+        IOptionsMonitor<AuthenticationSchemeOptions> options,
+        ILoggerFactory logger,
+        UrlEncoder encoder)
+        : base(options, logger, encoder) { }
+
+    protected override Task<AuthenticateResult> HandleAuthenticateAsync()
+    {
+        if (!Request.Headers.ContainsKey("Authorization"))
+            return Task.FromResult(AuthenticateResult.NoResult());
+
+        var claims = new[]
+        {
+            new Claim(ClaimTypes.Name, "test-apim"),
+            new Claim(ClaimTypes.Role, "Chargeback.Export"),
+            new Claim("oid", "00000000-0000-0000-0000-000000000099"),
+        };
+        var identity = new ClaimsIdentity(claims, "TestScheme");
+        var principal = new ClaimsPrincipal(identity);
+        var ticket = new AuthenticationTicket(principal, "TestScheme");
+        return Task.FromResult(AuthenticateResult.Success(ticket));
+    }
+}
 
 /// <summary>
 /// Custom WebApplicationFactory that replaces real Redis with an in-memory FakeRedis
@@ -77,6 +113,12 @@ public sealed class ChargebackApiFactory : WebApplicationFactory<Program>
                 .Returns(Task.FromResult(new List<Chargeback.Api.Models.AuditLogDocument>()));
             AuditStore = mockAuditStore;
             services.AddSingleton<IAuditStore>(mockAuditStore);
+
+            // Replace authentication with a test handler that auto-authenticates
+            services.AddAuthentication("TestScheme")
+                .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>("TestScheme", _ => { });
+            services.Configure<AuthenticationOptions>(o => o.DefaultAuthenticateScheme = "TestScheme");
+            services.Configure<AuthenticationOptions>(o => o.DefaultChallengeScheme = "TestScheme");
 
             // Ensure the audit channel is registered (may already be)
             if (!services.Any(d => d.ServiceType == typeof(Channel<AuditLogItem>)))

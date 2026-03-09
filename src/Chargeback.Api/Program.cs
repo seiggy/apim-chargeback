@@ -49,12 +49,14 @@ builder.Services.AddOpenApi();
 // Purview integration for DLP policy validation and audit emission (Agent 365)
 builder.Services.AddPurviewServices(builder.Configuration);
 
-// Entra ID JWT Bearer authentication for export endpoints
+// Entra ID JWT Bearer authentication
 builder.Services.AddAuthentication()
     .AddMicrosoftIdentityWebApi(builder.Configuration.GetSection("AzureAd"));
 builder.Services.AddAuthorizationBuilder()
     .AddPolicy("ExportPolicy", policy =>
-        policy.RequireRole("Chargeback.Export"));
+        policy.RequireRole("Chargeback.Export"))
+    .AddPolicy("ApimPolicy", policy =>
+        policy.RequireAuthenticatedUser());
 
 // CORS for React frontend
 builder.Services.AddCors(options =>

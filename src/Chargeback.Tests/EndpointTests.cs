@@ -19,6 +19,8 @@ public class EndpointTests : IClassFixture<ChargebackApiFactory>
     {
         _factory = factory;
         _client = factory.CreateClient();
+        _client.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", "test-token");
         _factory.Redis.Clear();
     }
 
@@ -554,14 +556,16 @@ public class EndpointTests : IClassFixture<ChargebackApiFactory>
     [Fact]
     public async Task ExportBillingSummary_WithoutAuth_ReturnsUnauthorized()
     {
-        var response = await _client.GetAsync("/api/export/billing-summary?year=2026&month=3");
+        using var anonClient = _factory.CreateClient();
+        var response = await anonClient.GetAsync("/api/export/billing-summary?year=2026&month=3");
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
     [Fact]
     public async Task ExportClientAudit_WithoutAuth_ReturnsUnauthorized()
     {
-        var response = await _client.GetAsync("/api/export/client-audit?clientAppId=test&year=2026&month=3");
+        using var anonClient = _factory.CreateClient();
+        var response = await anonClient.GetAsync("/api/export/client-audit?clientAppId=test&year=2026&month=3");
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 

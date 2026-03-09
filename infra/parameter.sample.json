@@ -52,6 +52,12 @@
     },
     "acrUsername": {
       "value": "<your-acr-name>"
+    },
+    "entraIdTenantId": {
+      "value": "<your-entra-tenant-id>"
+    },
+    "containerAppClientId": {
+      "value": "<your-container-app-app-registration-client-id>"
     }
   }
 }

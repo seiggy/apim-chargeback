@@ -22,6 +22,12 @@ param appInsightsConnectionString string = ''
 @description('Purview client app ID for Agent 365 integration')
 param purviewClientAppId string = ''
 
+@description('Entra ID tenant ID for JWT validation')
+param entraIdTenantId string = ''
+
+@description('Container App Entra ID app registration client ID (audience for APIM managed identity auth)')
+param containerAppClientId string = ''
+
 @description('Cosmos DB endpoint URL')
 param cosmosEndpoint string = ''
 
@@ -124,6 +130,18 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
             {
               name: 'PURVIEW_CLIENT_APP_ID'
               value: purviewClientAppId
+            }
+            {
+              name: 'AzureAd__TenantId'
+              value: entraIdTenantId
+            }
+            {
+              name: 'AzureAd__ClientId'
+              value: containerAppClientId
+            }
+            {
+              name: 'AzureAd__Audience'
+              value: !empty(containerAppClientId) ? 'api://${containerAppClientId}' : ''
             }
             {
               name: 'ConnectionStrings__chargeback'

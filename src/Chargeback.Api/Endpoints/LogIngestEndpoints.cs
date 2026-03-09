@@ -23,6 +23,7 @@ public static class LogIngestEndpoints
         group.MapPost("/log", IngestLog)
             .WithName("IngestLog")
             .WithDescription("Receives log data from APIM outbound policy and stores in Redis")
+            .RequireAuthorization("ApimPolicy")
             .Produces(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status401Unauthorized)

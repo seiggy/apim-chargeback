@@ -23,6 +23,12 @@ param workbookDisplayName string = 'Chargeback Log Analytics Dashboard'
 @description('Purview client app ID for Agent 365 integration (leave empty to skip).')
 param purviewClientAppId string = ''
 
+@description('Entra ID tenant ID for JWT validation.')
+param entraIdTenantId string = ''
+
+@description('Container App Entra ID app registration client ID. APIM uses this as the audience when acquiring managed identity tokens for the Container App.')
+param containerAppClientId string = ''
+
 @description('ACR login server for Container App image pull (e.g. myacr.azurecr.io).')
 param acrLoginServer string = ''
 
@@ -157,6 +163,8 @@ module containerApp './containerApp.bicep' = {
     azureResourceGroup: resourceGroup().name
     appInsightsConnectionString: appInsights.outputs.appInsightsConnectionString
     purviewClientAppId: purviewClientAppId
+    entraIdTenantId: entraIdTenantId
+    containerAppClientId: containerAppClientId
     acrLoginServer: acrLoginServer
     acrUsername: acrUsername
     acrPassword: acrPassword

@@ -34,11 +34,16 @@
 		<!-- Set variables for later use -->
 		<set-variable name="requestBody" value="@(context.Request.Body.As<string>(preserveContent: true))" />
 		<set-variable name="deploymentId" value="@(context.Request.Url.Path.Split('/').ElementAtOrDefault(3))" />
+		<!-- Acquire a token from APIM's managed identity for the Container App audience -->
+		<authentication-managed-identity resource="{{ContainerAppAudience}}" output-token-variable-name="msi-access-token" ignore-error="false" />
 		<!-- Pre-check: verify client has a valid plan and is within quota BEFORE calling OpenAI -->
 		<set-variable name="containerAppBaseUrl" value="{{ContainerAppUrl}}" />
 		<send-request mode="new" response-variable-name="precheckResponse" timeout="10" ignore-error="true">
 			<set-url>@((string)context.Variables["containerAppBaseUrl"] + "/api/precheck/" + (string)context.Variables["clientAppId"] + "?deploymentId=" + (string)context.Variables["deploymentId"])</set-url>
 			<set-method>GET</set-method>
+			<set-header name="Authorization" exists-action="override">
+				<value>@("Bearer " + (string)context.Variables["msi-access-token"])</value>
+			</set-header>
 		</send-request>
 		<choose>
 			<when condition="@(context.Variables["precheckResponse"] == null || ((IResponse)context.Variables["precheckResponse"]).StatusCode == 401)">
@@ -123,6 +128,9 @@
 			<set-method>POST</set-method>
 			<set-header name="Content-Type" exists-action="override">
 				<value>application/json</value>
+			</set-header>
+			<set-header name="Authorization" exists-action="override">
+				<value>@("Bearer " + (string)context.Variables["msi-access-token"])</value>
 			</set-header>
 			<set-body>@{
 				var requestBody = context.Variables.GetValueOrDefault<string>("requestBody");

@@ -11,7 +11,8 @@ public static class PrecheckEndpoints
     {
         routes.MapGet("/api/precheck/{clientAppId}", Precheck)
             .WithName("Precheck")
-            .WithDescription("Pre-authorize a client request — checks plan, quota, and rate limits");
+            .WithDescription("Pre-authorize a client request — checks plan, quota, and rate limits")
+            .RequireAuthorization("ApimPolicy");
         return routes;
     }
 
