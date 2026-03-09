@@ -37,7 +37,7 @@ public static class DashboardEndpoints
             var deleted = await db.KeyDeleteAsync(key);
             logger.LogInformation("Admin delete key={Key}, deleted={Deleted}", key, deleted);
             return deleted ? Results.Ok(new { deleted = key }) : Results.NotFound(new { error = $"Key '{key}' not found" });
-        }).WithName("AdminDeleteKey").WithDescription("Delete a Redis key (admin)");
+        }).WithName("AdminDeleteKey").WithDescription("Delete a Redis key (admin)").RequireAuthorization("AdminPolicy");
 
         return routes;
     }

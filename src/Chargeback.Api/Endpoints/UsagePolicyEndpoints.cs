@@ -19,6 +19,7 @@ public static class UsagePolicyEndpoints
         routes.MapPut("/api/settings/usage-policy", UpdateUsagePolicy)
             .WithName("UpdateUsagePolicy")
             .WithDescription("Update usage policy settings for billing cycle and retention")
+            .RequireAuthorization("AdminPolicy")
             .Produces<UsagePolicySettings>()
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status500InternalServerError);

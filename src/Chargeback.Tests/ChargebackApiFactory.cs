@@ -39,6 +39,7 @@ internal sealed class TestAuthHandler : AuthenticationHandler<AuthenticationSche
         {
             new Claim(ClaimTypes.Name, "test-apim"),
             new Claim(ClaimTypes.Role, "Chargeback.Export"),
+            new Claim(ClaimTypes.Role, "Chargeback.Admin"),
             new Claim("oid", "00000000-0000-0000-0000-000000000099"),
         };
         var identity = new ClaimsIdentity(claims, "TestScheme");

@@ -31,6 +31,7 @@ public static class PricingEndpoints
         routes.MapPut("/api/pricing/{modelId}", UpsertPricing)
             .WithName("UpsertPricing")
             .WithDescription("Create or update pricing for a model")
+            .RequireAuthorization("AdminPolicy")
             .Produces<ModelPricing>()
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status500InternalServerError);
@@ -38,6 +39,7 @@ public static class PricingEndpoints
         routes.MapDelete("/api/pricing/{modelId}", DeletePricing)
             .WithName("DeletePricing")
             .WithDescription("Delete pricing configuration for a model")
+            .RequireAuthorization("AdminPolicy")
             .Produces(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status500InternalServerError);

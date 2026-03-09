@@ -56,7 +56,12 @@ builder.Services.AddAuthorizationBuilder()
     .AddPolicy("ExportPolicy", policy =>
         policy.RequireRole("Chargeback.Export"))
     .AddPolicy("ApimPolicy", policy =>
-        policy.RequireAuthenticatedUser());
+        policy.RequireAuthenticatedUser())
+    .AddPolicy("AdminPolicy", policy =>
+        policy.RequireRole("Chargeback.Admin"))
+    .SetFallbackPolicy(new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder()
+        .RequireAuthenticatedUser()
+        .Build());
 
 // CORS for React frontend
 builder.Services.AddCors(options =>
@@ -71,7 +76,7 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
-// Aspire health check endpoints
+// Aspire health check endpoints (anonymous for probes)
 app.MapDefaultEndpoints();
 
 if (app.Environment.IsDevelopment())
@@ -99,8 +104,8 @@ app.MapPrecheckEndpoints();
 app.MapPricingEndpoints();
 app.MapUsagePolicyEndpoints();
 
-// SPA client-side routing fallback
-app.MapFallbackToFile("index.html");
+// SPA client-side routing fallback (anonymous — SPA handles its own auth)
+app.MapFallbackToFile("index.html").AllowAnonymous();
 
 app.Run();
 
