@@ -1,7 +1,7 @@
 param redisCacheName string
 param location string
 
-resource redisCache 'Microsoft.Cache/Redis@2021-06-01' = {
+resource redisCache 'Microsoft.Cache/Redis@2024-03-01' = {
   name: redisCacheName
   location: location
   properties: {
@@ -11,6 +11,10 @@ resource redisCache 'Microsoft.Cache/Redis@2021-06-01' = {
       capacity: 1
     }
     enableNonSslPort: false
+    disableAccessKeyAuthentication: true
+    redisConfiguration: {
+      'aad-enabled': 'true'
+    }
   }
   identity: {
     type: 'SystemAssigned'

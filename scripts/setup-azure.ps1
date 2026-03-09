@@ -717,14 +717,10 @@ try {
     }
     Write-Host "    ✓ Container App URL: $containerAppUrl" -ForegroundColor Green
 
-    # Fix Redis connection string
-    Write-Host "  Configuring Redis connection string..." -ForegroundColor Gray
-    $redisKey = az redis list-keys --name $RedisCacheName --resource-group $ResourceGroupName --query "primaryKey" -o tsv
-    if ($LASTEXITCODE -ne 0) { throw "Failed to get Redis keys." }
-    $redisConn = "$($RedisCacheName).redis.cache.windows.net:6380,password=$redisKey,ssl=True,abortConnect=False"
-    az containerapp update --name $ContainerAppName --resource-group $ResourceGroupName --set-env-vars "ConnectionStrings__redis=$redisConn" -o none
-    if ($LASTEXITCODE -ne 0) { throw "Failed to update Container App Redis connection." }
-    Write-Host "    ✓ Redis connection string configured" -ForegroundColor Green
+    # Redis uses Entra ID (managed identity) authentication — no access key needed.
+    # The connection string is set in the Bicep template without a password, and the
+    # Container App's managed identity is granted "Data Owner" via an access policy assignment.
+    Write-Host "    ✓ Redis uses Entra ID auth (managed identity) — no key required" -ForegroundColor Green
 
     # Configure Cosmos DB connection string
     Write-Host "  Configuring Cosmos DB connection..." -ForegroundColor Gray

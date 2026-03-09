@@ -12,6 +12,7 @@
     <!-- Azure -->
     <PackageVersion Include="Azure.Identity" Version="1.18.0" />
     <PackageVersion Include="Azure.Monitor.OpenTelemetry.AspNetCore" Version="1.4.0" />
+    <PackageVersion Include="Microsoft.Azure.StackExchangeRedis" Version="3.3.1" />
 
     <!-- Microsoft -->
     <PackageVersion Include="Microsoft.Agents.AI" Version="1.0.0-rc2" />

@@ -1,16 +1,26 @@
 using System.Threading.Channels;
+using Azure.Identity;
 using Chargeback.Api.Endpoints;
 using Chargeback.Api.Models;
 using Chargeback.Api.Services;
 using Microsoft.Identity.Web;
+using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Aspire service defaults: OpenTelemetry, health checks, service discovery, resilience
 builder.AddServiceDefaults();
 
-// Redis via Aspire integration (uses connection named "redis" from AppHost)
-builder.AddRedisClient("redis");
+// Redis via Aspire integration — uses Entra ID managed identity in Azure,
+// falls back to password auth for local Aspire dev containers.
+builder.AddRedisClient("redis", configureOptions: options =>
+{
+    if (string.IsNullOrEmpty(options.Password))
+    {
+        options.ConfigureForAzureWithTokenCredentialAsync(new DefaultAzureCredential())
+            .GetAwaiter().GetResult();
+    }
+});
 
 // Cosmos DB via Aspire integration (uses connection named "chargeback" from AppHost)
 builder.AddAzureCosmosClient("chargeback", configureClientOptions: options =>

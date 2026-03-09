@@ -271,14 +271,16 @@ module roleAssignmentContainerAppStorage './roleAssignment.bicep' = {
   }
 }
 
-module roleAssignmentContainerAppRedis './roleAssignment.bicep' = {
-  name: 'assignRedisRoleToContainerApp'
+// Entra ID data-plane access policy: grants Container App managed identity
+// "Data Owner" on Redis (read/write/pub-sub) via Microsoft Entra authentication.
+module redisAccessPolicy './redisAccessPolicy.bicep' = {
+  name: 'assignRedisAccessPolicyToContainerApp'
   dependsOn: [
     redisCache
-  ]  
+  ]
   params: {
+    redisCacheName: redisCacheName
     principalId: containerApp.outputs.containerAppPrincipalId
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b24988ac-6180-42a0-ab88-20f7382dd24c') // Contributor role
   }
 }
 
@@ -312,14 +314,7 @@ module roleAssignmentContainerAppApim './roleAssignment.bicep' = {
   }
 }
 
-module roleAssignmentRedis './roleAssignment.bicep' = {
-  name: 'assignContainerAppRoleToRedis'
-  scope: resourceGroup()
-  params: {
-    principalId: containerApp.outputs.containerAppPrincipalId
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'e0f68234-74aa-48ed-b826-c38b57376e17') // Redis Cache Contributor role
-  }
-}
+
 
 // Note: Cosmos DB data-plane RBAC is configured via az cosmosdb sql role assignment
 // in the setup-azure.ps1 script (Phase 6), not via ARM role assignments.

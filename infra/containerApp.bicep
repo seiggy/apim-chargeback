@@ -45,7 +45,7 @@ param minReplicas int = 1
 @maxValue(30)
 param maxReplicas int = 10
 
-resource redisCache 'Microsoft.Cache/Redis@2021-06-01' existing = {
+resource redisCache 'Microsoft.Cache/Redis@2024-03-01' existing = {
   name: redisCacheName
   scope: resourceGroup()
 }
