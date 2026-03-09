@@ -71,7 +71,7 @@ dotnet run --project demo
 |-----------|--------|--------------|
 | **APIM logs truncate at 8KB** | Large OpenAI payloads get cut off | ✅ APIM outbound policy forwards full payload to Chargeback API |
 | **No per-tenant usage tracking** | Cost overruns, no chargeback | ✅ JWT claim extraction (`tid`, `aud`, `azp`) for tenant-level cost allocation |
-| **Subscription key auth (legacy, disabled)** | Weak identity, no tenant isolation | ✅ Subscription keys disabled; Entra ID JWT bearer tokens with automatic claim-based routing |
+| **Subscription key auth (disabled)** | Weak identity, no tenant isolation | ✅ Subscription keys disabled; Entra ID JWT bearer tokens with automatic claim-based routing |
 | **No real-time visibility** | Delayed cost reporting | ✅ WebSocket streaming + React dashboard for live cost tracking |
 | **Manual deployment** | Inconsistent environments | ✅ Bicep IaC + .NET Aspire for local orchestration |
 

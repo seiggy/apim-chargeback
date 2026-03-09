@@ -48,7 +48,7 @@ public static class DashboardEndpoints
     {
         try
         {
-            var logs = await logDataService.GetAllLogsAsync(logger);
+            var logs = await logDataService.GetBillingPeriodSummariesAsync(logger);
             return Results.Json(new UsageSummaryResponse { UsageSummaries = logs }, JsonConfig.Default);
         }
         catch (Exception ex)
@@ -64,7 +64,7 @@ public static class DashboardEndpoints
     {
         try
         {
-            var logs = await logDataService.GetAllLogsAsync(logger);
+            var logs = await logDataService.GetBillingPeriodSummariesAsync(logger);
             return Results.Json(new LogsResponse { AggregatedLogs = logs }, JsonConfig.Default);
         }
         catch (Exception ex)
@@ -100,7 +100,7 @@ public static class DashboardEndpoints
     {
         try
         {
-            var logs = await logDataService.GetAllLogsAsync(logger);
+            var logs = await logDataService.GetBillingPeriodSummariesAsync(logger);
             var totalChargeback = logs.Sum(l => decimal.Parse(l.TotalCost));
 
             return Results.Json(new ChargebackResponse

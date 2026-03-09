@@ -9,15 +9,67 @@ public sealed class LogDataService : ILogDataService
     private readonly IConnectionMultiplexer _redis;
     private readonly IChargebackCalculator _calculator;
     private readonly ChargebackMetrics _metrics;
+    private readonly IAuditStore _auditStore;
+    private readonly IUsagePolicyStore _usagePolicyStore;
 
     public LogDataService(
         IConnectionMultiplexer redis,
         IChargebackCalculator calculator,
-        ChargebackMetrics metrics)
+        ChargebackMetrics metrics,
+        IAuditStore auditStore,
+        IUsagePolicyStore usagePolicyStore)
     {
         _redis = redis;
         _calculator = calculator;
         _metrics = metrics;
+        _auditStore = auditStore;
+        _usagePolicyStore = usagePolicyStore;
+    }
+
+    /// <inheritdoc />
+    public async Task<List<LogEntry>> GetBillingPeriodSummariesAsync(ILogger logger, CancellationToken ct = default)
+    {
+        var db = _redis.GetDatabase();
+        var policy = await _usagePolicyStore.GetAsync(db);
+        var periodStart = BillingPeriodCalculator.GetCurrentPeriodStartUtc(DateTime.UtcNow, policy.BillingCycleStartDay);
+
+        // Determine which YYYY-MM periods overlap the current billing cycle.
+        // If the cycle starts on day 1 only the current month is needed; otherwise
+        // the period spans two calendar months and we query both.
+        var periods = new HashSet<string> { $"{periodStart:yyyy-MM}" };
+        if (policy.BillingCycleStartDay > 1)
+        {
+            var nextMonth = periodStart.AddMonths(1);
+            periods.Add($"{nextMonth:yyyy-MM}");
+        }
+
+        var allSummaries = new List<BillingSummaryDocument>();
+        foreach (var period in periods)
+        {
+            var summaries = await _auditStore.GetBillingSummariesAsync(period, ct);
+            allSummaries.AddRange(summaries);
+        }
+
+        logger.LogInformation(
+            "Fetched {Count} billing summaries from Cosmos DB for period(s): {Periods}",
+            allSummaries.Count, string.Join(", ", periods));
+
+        return allSummaries.Select(doc => new LogEntry
+        {
+            TenantId = doc.TenantId,
+            ClientAppId = doc.ClientAppId,
+            Audience = doc.Audience,
+            DeploymentId = doc.DeploymentId,
+            Model = doc.Model,
+            PromptTokens = doc.PromptTokens,
+            CompletionTokens = doc.CompletionTokens,
+            TotalTokens = doc.TotalTokens,
+            ImageTokens = doc.ImageTokens,
+            TotalCost = doc.CostToUs.ToString("F4"),
+            CostToUs = doc.CostToUs.ToString("F4"),
+            CostToCustomer = doc.CostToCustomer.ToString("F4"),
+            IsOverbilled = doc.IsOverbilled,
+        }).ToList();
     }
 
     public async Task<List<LogEntry>> GetAllLogsAsync(ILogger logger)

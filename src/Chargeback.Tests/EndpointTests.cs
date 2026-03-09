@@ -5,6 +5,7 @@ using System.Linq;
 using System.Globalization;
 using Chargeback.Api.Models;
 using Chargeback.Api.Services;
+using NSubstitute;
 
 namespace Chargeback.Tests;
 
@@ -597,8 +598,26 @@ public class EndpointTests : IClassFixture<ChargebackApiFactory>
     [Fact]
     public async Task GetUsageSummary_IgnoresPricingKeys()
     {
-        SeedLog("tenant-usage-filter", "usage-filter-client", "gpt-4o", model: "gpt-4o", totalTokens: 100, costToUs: 0.1000m);
+        // Seed billing summary in Cosmos mock for the current period
+        var period = $"{DateTime.UtcNow:yyyy-MM}";
+        var summaries = new List<BillingSummaryDocument>
+        {
+            new()
+            {
+                Id = $"usage-filter-client:gpt-4o:{period}",
+                ClientAppId = "usage-filter-client",
+                TenantId = "tenant-usage-filter",
+                DeploymentId = "gpt-4o",
+                Model = "gpt-4o",
+                BillingPeriod = period,
+                TotalTokens = 100,
+                CostToUs = 0.1000m,
+            }
+        };
+        _factory.AuditStore.GetBillingSummariesAsync(period, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(summaries));
 
+        // Also seed a pricing key in Redis to verify it doesn't leak into results
         var pricing = new ModelPricing
         {
             ModelId = "gpt-4o-mini",
@@ -621,7 +640,23 @@ public class EndpointTests : IClassFixture<ChargebackApiFactory>
     [Fact]
     public async Task GetLogs_ReturnsAggregatedLogs()
     {
-        SeedLog("tenant-logs", "logs-client", "gpt-4o", model: "gpt-4o", totalTokens: 150);
+        // Seed billing summary in Cosmos mock for the current period
+        var period = $"{DateTime.UtcNow:yyyy-MM}";
+        var summaries = new List<BillingSummaryDocument>
+        {
+            new()
+            {
+                Id = $"logs-client:gpt-4o:{period}",
+                ClientAppId = "logs-client",
+                TenantId = "tenant-logs",
+                DeploymentId = "gpt-4o",
+                Model = "gpt-4o",
+                BillingPeriod = period,
+                TotalTokens = 150,
+            }
+        };
+        _factory.AuditStore.GetBillingSummariesAsync(period, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(summaries));
 
         var response = await _client.GetAsync("/logs");
         response.EnsureSuccessStatusCode();

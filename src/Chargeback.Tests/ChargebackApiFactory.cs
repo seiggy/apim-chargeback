@@ -19,6 +19,7 @@ namespace Chargeback.Tests;
 public sealed class ChargebackApiFactory : WebApplicationFactory<Program>
 {
     public FakeRedis Redis { get; } = new();
+    public IAuditStore AuditStore { get; private set; } = null!;
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -74,6 +75,7 @@ public sealed class ChargebackApiFactory : WebApplicationFactory<Program>
                 .Returns(Task.FromResult(new List<Chargeback.Api.Models.BillingSummaryDocument>()));
             mockAuditStore.GetClientAuditLogsAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
                 .Returns(Task.FromResult(new List<Chargeback.Api.Models.AuditLogDocument>()));
+            AuditStore = mockAuditStore;
             services.AddSingleton<IAuditStore>(mockAuditStore);
 
             // Ensure the audit channel is registered (may already be)
