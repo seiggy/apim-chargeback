@@ -69,8 +69,8 @@ dotnet run --project demo
 
 | Challenge | Impact | Our Solution |
 |-----------|--------|--------------|
-| **APIM diagnostic logs cap body at 8 KB** | Can't extract full token counts from truncated logs | ✅ APIM outbound policy forwards full payload directly to the Chargeback API |
 | **No per-tenant usage tracking** | Cost overruns, no chargeback | ✅ JWT claim extraction (`tid`, `aud`, `azp`) for tenant-level cost allocation |
+| **No quota or rate enforcement** | Uncontrolled OpenAI spend | ✅ Per-client monthly quotas, TPM/RPM limits enforced *before* requests reach OpenAI |
 | **Subscription key auth (disabled)** | Weak identity, no tenant isolation | ✅ Subscription keys disabled; Entra ID JWT bearer tokens with automatic claim-based routing |
 | **No real-time visibility** | Delayed cost reporting | ✅ WebSocket streaming + React dashboard for live cost tracking |
 | **Manual deployment** | Inconsistent environments | ✅ Bicep IaC + .NET Aspire for local orchestration |
@@ -335,7 +335,7 @@ When running via Aspire, connection strings and service discovery are configured
 ## FAQ
 
 **❓ What's the max payload size?**
-✅ Limited only by the Azure Container App request size limit (default 100 MB). APIM diagnostic logs (Application Insights) cap body logging at 8 KB per request/response, so we bypass that by forwarding full payloads via the outbound policy instead of relying on diagnostic logs for usage data.
+✅ Limited only by the Azure Container App request size limit (default 100 MB).
 
 **❓ How long is data retained?**
 ✅ Redis cache TTL is 24 hours. Azure Monitor retains telemetry per your workspace retention settings.

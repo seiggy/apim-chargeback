@@ -6,7 +6,6 @@
 An enterprise-ready chargeback and usage-tracking layer that sits between your applications and Azure OpenAI. Built on ASP.NET Minimal API (.NET 10), Azure Container Apps, Azure API Management, and Redis — it provides quota enforcement, rate limiting, per-client billing, and a React dashboard for visibility.
 
 ### What problem does it solve?
-- **APIM Diagnostic Log Limit**: Application Insights body logging in APIM caps at 8 KB per request/response. The outbound fire-and-forget policy forwards the full payload to the Chargeback API, ensuring accurate token counts regardless of response size.
 - **Cost Tracking**: No native way to track and allocate Azure OpenAI costs across teams, applications, or departments.
 - **Quota & Rate Enforcement**: Gate requests *before* they reach OpenAI, preventing runaway usage.
 - **Data Governance**: Minimal data persistence in Redis with configurable TTLs, plus optional Purview audit integration.
@@ -16,7 +15,7 @@ An enterprise-ready chargeback and usage-tracking layer that sits between your a
 ## Technical Questions
 
 ### What's the max payload size?
-**Container App limit** — default 100 MB. APIM diagnostic logs (Application Insights) cap body logging at 8 KB per request/response, so we bypass that by forwarding full payloads via the outbound policy instead of relying on diagnostic logs for usage data.
+**Container App limit** — default 100 MB.
 
 ### How long is data retained?
 
