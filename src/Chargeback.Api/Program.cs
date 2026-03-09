@@ -85,13 +85,14 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseCors();
+
+// Static files must be served before auth so the SPA (login page, JS, CSS) loads anonymously
+app.UseDefaultFiles();
+app.UseStaticFiles();
+
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseWebSockets();
-
-// Serve the React SPA from wwwroot/
-app.UseDefaultFiles();
-app.UseStaticFiles();
 
 // Map all endpoints
 app.MapLogIngestEndpoints();
