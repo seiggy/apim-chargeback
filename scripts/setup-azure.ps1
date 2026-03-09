@@ -397,39 +397,99 @@ try {
         }
     }
 
-    # Assign Chargeback.Export role to the deploying user
-    Write-Host "  Assigning 'Chargeback.Export' role to deploying user..." -ForegroundColor Gray
+    # Ensure Chargeback.Admin app role exists
+    Write-Host "  Ensuring 'Chargeback.Admin' app role..." -ForegroundColor Gray
+    $existingAdminRole = az ad app show --id $apiAppId --query "appRoles[?value=='Chargeback.Admin'] | [0].id" -o tsv 2>$null
+    if ([string]::IsNullOrWhiteSpace($existingAdminRole)) {
+        $adminRoleId = [guid]::NewGuid().ToString()
+        $currentRoles = az ad app show --id $apiAppId --query "appRoles" -o json 2>$null | ConvertFrom-Json
+        if (-not $currentRoles) { $currentRoles = @() }
+        $newRole = @{
+            id                 = $adminRoleId
+            allowedMemberTypes = @("User")
+            displayName        = "Chargeback Admin"
+            description        = "Allows the user to manage billing plans, client assignments, pricing, and usage policies"
+            value              = "Chargeback.Admin"
+            isEnabled          = $true
+        }
+        $allRoles = @($currentRoles) + @($newRole)
+        $roleBody = @{ appRoles = $allRoles } | ConvertTo-Json -Depth 5 -Compress
+        $roleFile = Join-Path $env:TEMP "app-role-body.json"
+        [System.IO.File]::WriteAllText($roleFile, $roleBody, [System.Text.UTF8Encoding]::new($false))
+        az rest --method PATCH --uri "https://graph.microsoft.com/v1.0/applications/$apiObjId" --headers "Content-Type=application/json" --body "@$roleFile" -o none
+        Remove-Item $roleFile -ErrorAction SilentlyContinue
+        if ($LASTEXITCODE -ne 0) { throw "Failed to add Chargeback.Admin app role." }
+        Write-Host "    ✓ 'Chargeback.Admin' app role created (ID: $adminRoleId)" -ForegroundColor Green
+    } else {
+        Write-Host "    ✓ 'Chargeback.Admin' app role already exists" -ForegroundColor Green
+        $adminRoleId = $existingAdminRole
+    }
+
+    # Ensure Chargeback.Apim app role exists (for APIM managed identity → Container App auth)
+    Write-Host "  Ensuring 'Chargeback.Apim' app role..." -ForegroundColor Gray
+    $existingApimRole = az ad app show --id $apiAppId --query "appRoles[?value=='Chargeback.Apim'] | [0].id" -o tsv 2>$null
+    if ([string]::IsNullOrWhiteSpace($existingApimRole)) {
+        $apimRoleId = [guid]::NewGuid().ToString()
+        $currentRoles = az ad app show --id $apiAppId --query "appRoles" -o json 2>$null | ConvertFrom-Json
+        if (-not $currentRoles) { $currentRoles = @() }
+        $newRole = @{
+            id                 = $apimRoleId
+            allowedMemberTypes = @("Application")
+            displayName        = "APIM Service"
+            description        = "Allows APIM to call the chargeback API precheck and log ingest endpoints"
+            value              = "Chargeback.Apim"
+            isEnabled          = $true
+        }
+        $allRoles = @($currentRoles) + @($newRole)
+        $roleBody = @{ appRoles = $allRoles } | ConvertTo-Json -Depth 5 -Compress
+        $roleFile = Join-Path $env:TEMP "app-role-body.json"
+        [System.IO.File]::WriteAllText($roleFile, $roleBody, [System.Text.UTF8Encoding]::new($false))
+        az rest --method PATCH --uri "https://graph.microsoft.com/v1.0/applications/$apiObjId" --headers "Content-Type=application/json" --body "@$roleFile" -o none
+        Remove-Item $roleFile -ErrorAction SilentlyContinue
+        if ($LASTEXITCODE -ne 0) { throw "Failed to add Chargeback.Apim app role." }
+        Write-Host "    ✓ 'Chargeback.Apim' app role created (ID: $apimRoleId)" -ForegroundColor Green
+    } else {
+        Write-Host "    ✓ 'Chargeback.Apim' app role already exists" -ForegroundColor Green
+        $apimRoleId = $existingApimRole
+    }
+
+    # Assign Chargeback.Export and Chargeback.Admin roles to the deploying user
+    Write-Host "  Assigning app roles to deploying user..." -ForegroundColor Gray
     $currentUserOid = az ad signed-in-user show --query "id" -o tsv 2>$null
     if (-not [string]::IsNullOrWhiteSpace($currentUserOid)) {
         $apiSpId = az ad sp show --id $apiAppId --query "id" -o tsv 2>$null
         if (-not [string]::IsNullOrWhiteSpace($apiSpId)) {
-            # Check if assignment already exists
-            $existingAssignment = az rest --method GET `
-                --uri "https://graph.microsoft.com/v1.0/servicePrincipals/$apiSpId/appRoleAssignedTo" `
-                --query "value[?principalId=='$currentUserOid' && appRoleId=='$exportRoleId'] | [0].id" -o tsv 2>$null
-            if ([string]::IsNullOrWhiteSpace($existingAssignment)) {
-                $assignBody = @{
-                    principalId = $currentUserOid
-                    resourceId  = $apiSpId
-                    appRoleId   = $exportRoleId
-                } | ConvertTo-Json -Compress
-                $assignFile = Join-Path $env:TEMP "role-assign-body.json"
-                [System.IO.File]::WriteAllText($assignFile, $assignBody, [System.Text.UTF8Encoding]::new($false))
-                az rest --method POST `
+            foreach ($roleEntry in @(
+                @{ Name = "Chargeback.Export"; Id = $exportRoleId },
+                @{ Name = "Chargeback.Admin";  Id = $adminRoleId }
+            )) {
+                $existingAssignment = az rest --method GET `
                     --uri "https://graph.microsoft.com/v1.0/servicePrincipals/$apiSpId/appRoleAssignedTo" `
-                    --headers "Content-Type=application/json" --body "@$assignFile" -o none 2>$null
-                Remove-Item $assignFile -ErrorAction SilentlyContinue
-                if ($LASTEXITCODE -eq 0) {
-                    Write-Host "    ✓ Chargeback.Export role assigned to current user" -ForegroundColor Green
+                    --query "value[?principalId=='$currentUserOid' && appRoleId=='$($roleEntry.Id)'] | [0].id" -o tsv 2>$null
+                if ([string]::IsNullOrWhiteSpace($existingAssignment)) {
+                    $assignBody = @{
+                        principalId = $currentUserOid
+                        resourceId  = $apiSpId
+                        appRoleId   = $roleEntry.Id
+                    } | ConvertTo-Json -Compress
+                    $assignFile = Join-Path $env:TEMP "role-assign-body.json"
+                    [System.IO.File]::WriteAllText($assignFile, $assignBody, [System.Text.UTF8Encoding]::new($false))
+                    az rest --method POST `
+                        --uri "https://graph.microsoft.com/v1.0/servicePrincipals/$apiSpId/appRoleAssignedTo" `
+                        --headers "Content-Type=application/json" --body "@$assignFile" -o none 2>$null
+                    Remove-Item $assignFile -ErrorAction SilentlyContinue
+                    if ($LASTEXITCODE -eq 0) {
+                        Write-Host "    ✓ $($roleEntry.Name) role assigned to current user" -ForegroundColor Green
+                    } else {
+                        Write-Host "    ⚠ Could not assign $($roleEntry.Name) — assign manually in Entra ID" -ForegroundColor DarkYellow
+                    }
                 } else {
-                    Write-Host "    ⚠ Could not assign role — you may need to assign it manually in Entra ID" -ForegroundColor DarkYellow
+                    Write-Host "    ✓ $($roleEntry.Name) role already assigned to current user" -ForegroundColor Green
                 }
-            } else {
-                Write-Host "    ✓ Chargeback.Export role already assigned to current user" -ForegroundColor Green
             }
         }
     } else {
-        Write-Host "    ⚠ Could not determine current user — assign Chargeback.Export role manually" -ForegroundColor DarkYellow
+        Write-Host "    ⚠ Could not determine current user — assign roles manually in Entra ID" -ForegroundColor DarkYellow
     }
 
     $deploymentOutput["apiAppId"] = $apiAppId
@@ -796,6 +856,41 @@ try {
         Write-Host "    ⚠ No AI Services account found — skipping role assignment" -ForegroundColor DarkYellow
     }
 
+    # Assign Chargeback.Apim app role to APIM managed identity
+    Write-Host "  Assigning 'Chargeback.Apim' app role to APIM managed identity..." -ForegroundColor Gray
+    $apiSpId = az ad sp show --id $apiAppId --query "id" -o tsv 2>$null
+    if (-not [string]::IsNullOrWhiteSpace($apiSpId) -and -not [string]::IsNullOrWhiteSpace($apimPrincipal)) {
+        $apimSpId = az ad sp show --id $apimPrincipal --query "id" -o tsv 2>$null
+        if ([string]::IsNullOrWhiteSpace($apimSpId)) {
+            $apimSpId = $apimPrincipal
+        }
+        $existingApimAssignment = az rest --method GET `
+            --uri "https://graph.microsoft.com/v1.0/servicePrincipals/$apiSpId/appRoleAssignedTo" `
+            --query "value[?principalId=='$apimSpId' && appRoleId=='$apimRoleId'] | [0].id" -o tsv 2>$null
+        if ([string]::IsNullOrWhiteSpace($existingApimAssignment)) {
+            $assignBody = @{
+                principalId = $apimSpId
+                resourceId  = $apiSpId
+                appRoleId   = $apimRoleId
+            } | ConvertTo-Json -Compress
+            $assignFile = Join-Path $env:TEMP "apim-role-assign.json"
+            [System.IO.File]::WriteAllText($assignFile, $assignBody, [System.Text.UTF8Encoding]::new($false))
+            az rest --method POST `
+                --uri "https://graph.microsoft.com/v1.0/servicePrincipals/$apiSpId/appRoleAssignedTo" `
+                --headers "Content-Type=application/json" --body "@$assignFile" -o none 2>$null
+            Remove-Item $assignFile -ErrorAction SilentlyContinue
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "    ✓ Chargeback.Apim role assigned to APIM managed identity" -ForegroundColor Green
+            } else {
+                Write-Host "    ⚠ Could not assign Chargeback.Apim role to APIM — assign manually" -ForegroundColor DarkYellow
+            }
+        } else {
+            Write-Host "    ✓ Chargeback.Apim role already assigned to APIM managed identity" -ForegroundColor Green
+        }
+    } else {
+        Write-Host "    ⚠ Could not resolve service principals — assign Chargeback.Apim role manually" -ForegroundColor DarkYellow
+    }
+
     $deploymentOutput["apimName"] = $ApimName
 
     Write-Host "  Phase 6 complete ✓" -ForegroundColor Green
@@ -827,6 +922,10 @@ try {
     az apim nv create --resource-group $ResourceGroupName --service-name $ApimName `
         --named-value-id ContainerAppUrl --display-name "ContainerAppUrl" --value "https://$containerAppUrl" -o none 2>$null
     Write-Host "    ✓ ContainerAppUrl = https://$containerAppUrl" -ForegroundColor Green
+
+    az apim nv create --resource-group $ResourceGroupName --service-name $ApimName `
+        --named-value-id ContainerAppAudience --display-name "ContainerAppAudience" --value "api://$apiAppId" -o none 2>$null
+    Write-Host "    ✓ ContainerAppAudience = api://$apiAppId" -ForegroundColor Green
 
     # Disable subscription required on the OpenAI API
     Write-Host "  Disabling subscription requirement on OpenAI API..." -ForegroundColor Gray

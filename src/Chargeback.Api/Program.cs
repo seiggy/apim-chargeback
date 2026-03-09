@@ -56,7 +56,7 @@ builder.Services.AddAuthorizationBuilder()
     .AddPolicy("ExportPolicy", policy =>
         policy.RequireRole("Chargeback.Export"))
     .AddPolicy("ApimPolicy", policy =>
-        policy.RequireAuthenticatedUser())
+        policy.RequireRole("Chargeback.Apim"))
     .AddPolicy("AdminPolicy", policy =>
         policy.RequireRole("Chargeback.Admin"))
     .SetFallbackPolicy(new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder()
