@@ -351,23 +351,6 @@ try {
     Write-Host "  Ensuring API enterprise application exists..." -ForegroundColor Gray
     Ensure-ServicePrincipal -AppId $apiAppId -DisplayName "Chargeback API"
 
-    # Allow Azure CLI to acquire tokens for this API (needed by Phase 9 setup calls)
-    Write-Host "  Ensuring Azure CLI is a known client application..." -ForegroundColor Gray
-    $azureCliAppId = "04b07795-ee44-4aec-8b98-a9b01e0e3d44"
-    $knownClients = az ad app show --id $apiAppId --query "api.knownClientApplications" -o json 2>$null | ConvertFrom-Json
-    if (-not $knownClients) { $knownClients = @() }
-    if ($knownClients -notcontains $azureCliAppId) {
-        $knownClients = @($knownClients) + @($azureCliAppId)
-        $kcBody = @{ api = @{ knownClientApplications = $knownClients } } | ConvertTo-Json -Depth 3 -Compress
-        $kcFile = Join-Path $env:TEMP "known-clients.json"
-        [System.IO.File]::WriteAllText($kcFile, $kcBody, [System.Text.UTF8Encoding]::new($false))
-        az rest --method PATCH --uri "https://graph.microsoft.com/v1.0/applications/$apiObjId" --headers "Content-Type=application/json" --body "@$kcFile" -o none
-        Remove-Item $kcFile -ErrorAction SilentlyContinue
-        Write-Host "    ✓ Azure CLI added to knownClientApplications" -ForegroundColor Green
-    } else {
-        Write-Host "    ✓ Azure CLI already in knownClientApplications" -ForegroundColor Green
-    }
-
     # Ensure Chargeback.Export app role exists on the API app
     Write-Host "  Ensuring 'Chargeback.Export' app role..." -ForegroundColor Gray
     $existingExportRole = az ad app show --id $apiAppId --query "appRoles[?value=='Chargeback.Export'] | [0].id" -o tsv 2>$null
@@ -423,9 +406,9 @@ try {
         if (-not $currentRoles) { $currentRoles = @() }
         $newRole = @{
             id                 = $adminRoleId
-            allowedMemberTypes = @("User")
+            allowedMemberTypes = @("User", "Application")
             displayName        = "Chargeback Admin"
-            description        = "Allows the user to manage billing plans, client assignments, pricing, and usage policies"
+            description        = "Allows the user or application to manage billing plans, client assignments, pricing, and usage policies"
             value              = "Chargeback.Admin"
             isEnabled          = $true
         }
@@ -511,6 +494,7 @@ try {
 
     $deploymentOutput["apiAppId"] = $apiAppId
     $deploymentOutput["apiObjId"] = $apiObjId
+    $deploymentOutput["adminRoleId"] = $adminRoleId
 
     # --- Client App 1 ---
     Write-Host "  Creating client app 'Chargeback Sample Client'..." -ForegroundColor Gray
@@ -534,6 +518,26 @@ try {
     $client1Secret = az ad app credential reset --id $client1AppId --display-name "setup-script" --years 1 --query "password" -o tsv 2>$null
     if ($client1Secret) {
         Write-Host "    ✓ Client 1 secret created" -ForegroundColor Green
+    }
+
+    # Assign Chargeback.Admin to client 1 SP (used by Phase 9 for plan seeding)
+    $client1SpId = az ad sp show --id $client1AppId --query "id" -o tsv 2>$null
+    $apiSpId = az ad sp show --id $apiAppId --query "id" -o tsv 2>$null
+    if (-not [string]::IsNullOrWhiteSpace($client1SpId) -and -not [string]::IsNullOrWhiteSpace($apiSpId)) {
+        $existingAdminAssign = az rest --method GET `
+            --uri "https://graph.microsoft.com/v1.0/servicePrincipals/$apiSpId/appRoleAssignedTo" `
+            --query "value[?principalId=='$client1SpId' && appRoleId=='$adminRoleId'] | [0].id" -o tsv 2>$null
+        if ([string]::IsNullOrWhiteSpace($existingAdminAssign)) {
+            $assignBody = @{ principalId = $client1SpId; resourceId = $apiSpId; appRoleId = $adminRoleId } | ConvertTo-Json -Compress
+            $assignFile = Join-Path $env:TEMP "client1-admin-role.json"
+            [System.IO.File]::WriteAllText($assignFile, $assignBody, [System.Text.UTF8Encoding]::new($false))
+            az rest --method POST --uri "https://graph.microsoft.com/v1.0/servicePrincipals/$apiSpId/appRoleAssignedTo" `
+                --headers "Content-Type=application/json" --body "@$assignFile" -o none 2>$null
+            Remove-Item $assignFile -ErrorAction SilentlyContinue
+            Write-Host "    ✓ Chargeback.Admin role assigned to Client 1 SP" -ForegroundColor Green
+        } else {
+            Write-Host "    ✓ Chargeback.Admin role already assigned to Client 1 SP" -ForegroundColor Green
+        }
     }
 
     $deploymentOutput["client1AppId"] = $client1AppId
@@ -1026,11 +1030,23 @@ Write-Host "━━━━━━━━━━━━━━━━━━━━━━�
 try {
     $baseUrl = "https://$containerAppUrl"
 
-    # Acquire an access token for the current user (who has Chargeback.Admin role)
-    Write-Host "  Acquiring access token for Container App API..." -ForegroundColor Gray
-    $accessToken = az account get-access-token --resource "api://$apiAppId" --query "accessToken" -o tsv 2>$null
+    # Acquire an access token using client1 credentials (has Chargeback.Admin role)
+    Write-Host "  Acquiring access token via client credentials..." -ForegroundColor Gray
+    $tokenEndpoint = "https://login.microsoftonline.com/$tenantId/oauth2/v2.0/token"
+    $tokenBody = @{
+        grant_type    = "client_credentials"
+        client_id     = $client1AppId
+        client_secret = $client1Secret
+        scope         = "api://$apiAppId/.default"
+    }
+    try {
+        $tokenResponse = Invoke-RestMethod -Uri $tokenEndpoint -Method Post -Body $tokenBody -ContentType "application/x-www-form-urlencoded" -ErrorAction Stop
+        $accessToken = $tokenResponse.access_token
+    } catch {
+        throw "Failed to acquire access token via client credentials: $($_.Exception.Message)"
+    }
     if ([string]::IsNullOrWhiteSpace($accessToken)) {
-        throw "Failed to acquire access token for api://$apiAppId. Ensure the current user has the Chargeback.Admin role assigned."
+        throw "Token response did not contain an access token."
     }
     $authHeaders = @{ Authorization = "Bearer $accessToken" }
     Write-Host "    ✓ Access token acquired" -ForegroundColor Green
