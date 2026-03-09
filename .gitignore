@@ -64,4 +64,20 @@ Thumbs.db
 
 # Deployment outputs
 infraOutputs.json
-.env
+
+# Certificates and keys
+*.pfx
+*.key
+*.pem
+*.p12
+*.cer
+
+# .NET user secrets / local settings
+secrets.json
+
+# Test results and coverage
+**/TestResults/
+**/BenchmarkDotNet.Artifacts/
+
+# Load test reports
+src/Chargeback.LoadTest/reports/
