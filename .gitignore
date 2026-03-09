@@ -1,4 +1,7 @@
 
+# Deployment outputs (may contain secrets)
+deployment-output.json
+
 # Logs
 *.log
 logs/
@@ -58,3 +61,4 @@ Thumbs.db
 
 # Deployment outputs
 infraOutputs.json
+.env
