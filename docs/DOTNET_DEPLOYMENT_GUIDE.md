@@ -301,7 +301,7 @@ dotnet run demo/DemoClient.cs
 
 ## Bicep Parameters Reference
 
-Parameters for `main.bicep` (see `infra/parameter.json` for example values):
+Parameters for `main.bicep` (see `infra/bicep/parameter.json` for example values):
 
 | Parameter | Required | Default | Description |
 |-----------|----------|---------|-------------|

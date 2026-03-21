@@ -753,12 +753,12 @@ if ($SkipBicep) {
         Write-Host "    ✓ Azure AI Services name: $AiServiceName" -ForegroundColor Green
 
         Write-Host "  Starting Bicep deployment (this may take 30-60 minutes for APIM)..." -ForegroundColor Magenta
-        Write-Host "    Template: infra/main.bicep" -ForegroundColor Gray
+        Write-Host "    Template: infra/bicep/main.bicep" -ForegroundColor Gray
 
         $bicepResult = az deployment group create `
             --resource-group $ResourceGroupName `
-            --template-file "$RepoRoot/infra/main.bicep" `
-            --parameters "$RepoRoot/infra/parameter.json" `
+            --template-file "$RepoRoot/infra/bicep/main.bicep" `
+            --parameters "$RepoRoot/infra/bicep/parameter.json" `
             --parameters `
                 location=$Location `
                 workloadName=$WorkloadName `

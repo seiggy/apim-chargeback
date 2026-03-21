@@ -291,12 +291,13 @@ demo/
 policies/
 ├── entra-jwt-policy.xml            # APIM policy (Entra JWT + precheck + log forwarding)
 infra/
-├── main.bicep                      # Main deployment template
-├── containerApp.bicep              # Azure Container App
-├── appInsights.bicep               # Application Insights + Log Analytics
-├── redisCache.bicep                # Azure Cache for Redis
-├── apimInstance.bicep              # APIM instance
-└── ...                             # Additional Bicep modules
+├── bicep/                          # Bicep IaC modules
+│   ├── main.bicep                  # Main deployment template
+│   ├── containerApp.bicep          # Azure Container App
+│   ├── appInsights.bicep           # Application Insights + Log Analytics
+│   ├── redisCache.bicep            # Azure Managed Redis
+│   ├── apimInstance.bicep          # APIM instance
+│   └── ...                         # Additional Bicep modules
 scripts/
 ├── setup-azure.ps1                 # Automated Azure deployment script
 └── deploy-functionapp-test.ps1     # Bicep testing patterns (reference)
@@ -307,21 +308,21 @@ docs/                               # Documentation
 
 ## Infrastructure
 
-Infrastructure is defined in Bicep modules under `infra/`:
+Infrastructure is defined in Bicep modules under `infra/bicep/`:
 
 | Module | Resource |
 |--------|----------|
 | `containerApp.bicep` | Azure Container App for Chargeback.Api |
 | `appInsights.bicep` | Application Insights + Log Analytics workspace |
 | `logAnalyticsWorkbook.bicep` | Azure Monitor workbook dashboard (Log Analytics KQL) |
-| `redisCache.bicep` | Azure Cache for Redis |
+| `redisCache.bicep` | Azure Managed Redis |
 | `apimInstance.bicep` | API Management instance |
 | `keyVault.bicep` | Azure Key Vault for secrets |
 | `main.bicep` | Orchestrates all modules |
 
 ```bash
 # Deploy infrastructure
-cd infra
+cd infra/bicep
 az deployment group create \
   --resource-group myResourceGroup \
   --template-file main.bicep \
