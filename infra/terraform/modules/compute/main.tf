@@ -22,13 +22,15 @@ resource "azurerm_container_registry" "this" {
 # =============================================================================
 
 resource "azurerm_storage_account" "this" {
-  name                     = replace("${var.name_prefix}sa", "-", "")
-  location                 = var.location
-  resource_group_name      = var.resource_group_name
-  account_tier             = "Standard"
-  account_replication_type = "LRS"
-  min_tls_version          = "TLS1_2"
-  tags                     = var.tags
+  name                          = replace("${var.name_prefix}sa", "-", "")
+  location                      = var.location
+  resource_group_name           = var.resource_group_name
+  account_tier                  = "Standard"
+  account_replication_type      = "LRS"
+  min_tls_version               = "TLS1_2"
+  shared_access_key_enabled     = false
+  default_to_oauth_authentication = true
+  tags                          = var.tags
 
   identity {
     type = "SystemAssigned"

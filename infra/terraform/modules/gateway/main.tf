@@ -86,6 +86,13 @@ resource "azurerm_api_management_api_policy" "openai" {
   api_management_name = azurerm_api_management.this.name
   resource_group_name = var.resource_group_name
   xml_content         = file(var.policy_xml_path)
+
+  depends_on = [
+    azurerm_api_management_named_value.entra_tenant_id,
+    azurerm_api_management_named_value.expected_audience,
+    azurerm_api_management_named_value.container_app_url,
+    azurerm_api_management_named_value.container_app_audience,
+  ]
 }
 
 # =============================================================================
