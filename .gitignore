@@ -3,7 +3,14 @@
 deployment-output.json
 
 # Environment-specific deployment parameters (copy parameter.sample.json to parameter.json)
-infra/parameter.json
+infra/bicep/parameter.json
+
+# Terraform
+infra/terraform/.terraform/
+infra/terraform/.terraform.lock.hcl
+infra/terraform/terraform.tfstate*
+infra/terraform/terraform.tfvars
+infra/terraform/.terraform.tfstate.lock.info
 
 # Logs
 *.log
