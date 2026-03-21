@@ -14,7 +14,7 @@ Enterprise-ready solution for Azure OpenAI usage tracking and chargeback through
 
 **🚀 Quick Deploy**: `git clone → ./scripts/setup-azure.ps1 → done`
 
-**💰 What you get**: Real-time usage tracking, per-client billing plans with quotas and rate limits, overbilling support, per-deployment quotas, WebSocket live dashboard, durable Cosmos DB audit trail, monthly billing exports, DLP policy validation via Purview
+**💰 What you get**: Real-time usage tracking, per-customer billing plans with quotas and rate limits (where a "customer" is any client app + tenant combination), overbilling support, per-deployment quotas, WebSocket live dashboard, durable Cosmos DB audit trail, monthly billing exports, DLP policy validation via Purview
 
 **🏗️ Tech Stack**: .NET 10, Azure Container Apps, ASP.NET Minimal APIs, .NET Aspire, React/TypeScript, Redis, Cosmos DB, OpenTelemetry + Azure Monitor, Microsoft Purview (Agent 365)
 
@@ -34,8 +34,14 @@ The Aspire dashboard opens automatically at `https://localhost:17224` and provid
 ### Azure Deployment
 
 ```powershell
+# Basic deployment (single-tenant)
 ./scripts/setup-azure.ps1 -Location eastus2
+
+# Multi-tenant demo — register a second tenant for Client 2
+./scripts/setup-azure.ps1 -Location eastus2 -SecondaryTenantId "<other-tenant-guid>"
 ```
+
+The `-SecondaryTenantId` parameter registers Client 2 (a multi-tenant app) for billing under a second Entra tenant. This demonstrates per-tenant chargeback — the same client app ID appears as two separate billing customers in the dashboard, each with independent quotas and usage tracking.
 
 The setup script also writes `src/chargeback-ui/.env.production.local` with the current tenant/client/audience IDs so dashboard login uses the newly created Entra app registrations.
 
@@ -60,17 +66,21 @@ dotnet user-secrets --project demo set "DemoClient:Clients:0:AppId" "<client-app
 dotnet user-secrets --project demo set "DemoClient:Clients:0:Secret" "<client-secret>"
 dotnet user-secrets --project demo set "DemoClient:Clients:0:Plan" "Enterprise"
 dotnet user-secrets --project demo set "DemoClient:Clients:0:DeploymentId" "gpt-4o"
+dotnet user-secrets --project demo set "DemoClient:Clients:0:TenantId" "<tenant-id>"
 
 # Generate synthetic traffic with Agent Framework (1.0.0-rc2) agents
 dotnet run --project demo
 ```
 
+Each demo client can specify its own `TenantId`. If omitted, it inherits the global `DemoClient:TenantId`. This allows testing multi-tenant scenarios where the same client app authenticates against different Entra tenants.
+
 ## The Problem We Solve
 
 | Challenge | Impact | Our Solution |
 |-----------|--------|--------------|
-| **No per-tenant usage tracking** | Cost overruns, no chargeback | ✅ JWT claim extraction (`tid`, `aud`, `azp`) for tenant-level cost allocation |
-| **No quota or rate enforcement** | Uncontrolled OpenAI spend | ✅ Per-client monthly quotas, TPM/RPM limits enforced *before* requests reach OpenAI |
+| **No per-tenant usage tracking** | Cost overruns, no chargeback | ✅ JWT claim extraction (`tid`, `aud`, `azp`) — billing keyed on client+tenant combination |
+| **SaaS apps serving multiple customers** | Single app ID can't distinguish tenants | ✅ Combined `clientAppId:tenantId` customer key — each tenant gets independent quotas, rate limits, and billing |
+| **No quota or rate enforcement** | Uncontrolled OpenAI spend | ✅ Per-customer monthly quotas, TPM/RPM limits enforced *before* requests reach OpenAI |
 | **Subscription key auth (disabled)** | Weak identity, no tenant isolation | ✅ Subscription keys disabled; Entra ID JWT bearer tokens with automatic claim-based routing |
 | **No real-time visibility** | Delayed cost reporting | ✅ WebSocket streaming + React dashboard for live cost tracking |
 | **Manual deployment** | Inconsistent environments | ✅ Bicep IaC + .NET Aspire for local orchestration |
@@ -95,19 +105,20 @@ A single **Azure Container App** (`Chargeback.Api`) hosts all chargeback functio
 |----------|--------|-------------|
 | `/` | GET | React SPA dashboard |
 | `/api/log` | POST | APIM outbound policy calls this to record usage |
-| `/api/precheck/{clientAppId}` | GET | APIM inbound policy calls this to check quota/rate limits |
+| `/api/precheck/{clientAppId}/{tenantId}` | GET | APIM inbound policy calls this to check quota/rate limits |
 | `/api/usage` | GET | Aggregated usage summaries |
 | `/api/logs` | GET | Individual request log entries |
 | `/chargeback` | GET | Total chargeback amount with itemized data |
 | `/api/plans` | GET/POST/PUT/DELETE | Billing plan CRUD |
-| `/api/clients` | GET/PUT/DELETE | Client assignment management |
-| `/api/clients/{id}/usage` | GET | Per-client usage report |
-| `/api/clients/{id}/traces` | GET | Per-client request traces |
+| `/api/clients` | GET | List all customer assignments |
+| `/api/clients/{clientAppId}/{tenantId}` | PUT/DELETE | Customer assignment management (client+tenant) |
+| `/api/clients/{clientAppId}/{tenantId}/usage` | GET | Per-customer usage report |
+| `/api/clients/{clientAppId}/{tenantId}/traces` | GET | Per-customer request traces |
 | `/api/pricing` | GET/PUT/DELETE | Model cost rate management |
 | `/api/quotas` | GET/PUT/DELETE | Per-client quota overrides |
 | `/api/export/available-periods` | GET | Available billing periods and clients for export (requires `Chargeback.Export` role) |
-| `/api/export/billing-summary` | GET | Monthly billing summary CSV for all clients (requires `Chargeback.Export` role) |
-| `/api/export/client-audit` | GET | Client-specific audit trail CSV (requires `Chargeback.Export` role) |
+| `/api/export/billing-summary` | GET | Monthly billing summary CSV for all customers (requires `Chargeback.Export` role) |
+| `/api/export/client-audit` | GET | Customer-specific audit trail CSV (requires `Chargeback.Export` role) |
 | `/ws/logs` | WS | WebSocket endpoint for real-time updates |
 
 **Core Components**:
@@ -136,11 +147,47 @@ Authentication uses **Entra ID (Azure AD) App Registrations** with JWT bearer to
 
 | JWT Claim | Purpose |
 |-----------|---------|
-| `tid` | Tenant ID — identifies the billing tenant |
+| `tid` | Tenant ID — identifies the Entra directory / organization |
 | `aud` | Audience — validates the token is intended for this API |
 | `azp` / `appid` | Authorized Party — identifies the calling client application (`azp` for delegated tokens, `appid` for client_credentials) |
 
 > **Subscription keys are disabled.** All authentication uses standard `Authorization: Bearer <token>` headers validated by Entra ID.
+
+### Multi-Tenant Customer Model
+
+A **"Customer"** in the billing system is uniquely identified by the combination of `clientAppId` + `tenantId` — not just the client app alone. This enables scenarios where:
+
+- A **SaaS company** registers one Entra app (`clientAppId`) for their "Mobile App" but sells it to multiple organizations. Each customer's Entra tenant (`tenantId`) gets independent billing, quotas, and rate limits.
+- An **internal platform team** provisions a shared client app used by multiple departments. Each department's tenant gets its own usage tracking and cost allocation.
+- A **single-tenant app** works identically — the customer key is simply `{clientAppId}:{tenantId}` where tenantId is the app's home tenant.
+
+All Redis keys, Cosmos DB partition keys, and dashboard views use this combined customer key:
+
+| Storage | Key Pattern | Example |
+|---------|-------------|---------|
+| **Redis client** | `client:{clientAppId}:{tenantId}` | `client:f5908fef-...9620:99e1e9a1-...c59a` |
+| **Redis usage logs** | `log:{clientAppId}:{tenantId}:{deploymentId}` | `log:f5908fef-...9620:99e1e9a1-...c59a:gpt-4o` |
+| **Redis rate limits** | `ratelimit:rpm:{clientAppId}:{tenantId}:{window}` | `ratelimit:rpm:f5908fef-...9620:99e1e9a1-...c59a:45982` |
+| **Cosmos DB** | Partition key: `/customerKey` | `f5908fef-...9620:99e1e9a1-...c59a` |
+
+#### Configuring Multi-Tenant Client Apps
+
+**Client 1 (single-tenant)** — Registered as `AzureADMyOrg`. The tenant ID in the JWT `tid` claim always matches the deployment tenant. One customer entry.
+
+**Client 2 (multi-tenant)** — Registered as `AzureADMultipleOrgs`. Can authenticate from any Entra tenant. Each unique `tid` creates a separate customer entry with its own plan, quota, and rate limits.
+
+To register a multi-tenant client for multiple tenants:
+
+```powershell
+# During deployment — registers Client 2 for a second tenant automatically
+./scripts/setup-azure.ps1 -SecondaryTenantId "<other-tenant-guid>"
+
+# Or manually via the API after deployment
+curl -X PUT "https://<container-app>/api/clients/<clientAppId>/<tenantId>" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"planId": "<plan-id>", "displayName": "Acme Corp Mobile App"}'
+```
 
 ### Export Role Configuration
 
@@ -185,8 +232,9 @@ The APIM outbound policy automatically forwards the response payload and JWT cla
 ## Key Features
 
 - 🚀 **Single Container App**: All chargeback logic in one ASP.NET Minimal API
+- 🏢 **Multi-Tenant Billing**: Combined `clientAppId:tenantId` customer key — one SaaS app can have per-tenant quotas, rate limits, and billing
 - 💰 **Billing Plan System**: Create plans with monthly quotas, rate limits, overbilling, and per-deployment quotas
-- 📊 **Per-Client Tracking**: Assign clients to plans and track usage against quota limits
+- 📊 **Per-Customer Tracking**: Assign client+tenant combinations to plans and track usage against quota limits
 - ⚡ **Rate Limiting & Quota Enforcement**: APIM inbound pre-check blocks requests when quota or rate limits are exceeded
 - 📡 **Real-Time Dashboard**: WebSocket streaming to a five-page React/TypeScript SPA
 - 🔭 **Full Observability**: OpenTelemetry via Aspire ServiceDefaults + Azure Monitor
@@ -307,6 +355,7 @@ PURVIEW_CLIENT_APP_ID=your-purview-app-id
 # DemoClient configuration (alternative to user-secrets; auto-loaded from .env.local/.env)
 # See demo/.env.sample for a copyable template.
 DemoClient__TenantId=<tenant-id>
+DemoClient__SecondaryTenantId=<optional-second-tenant-for-multi-tenant-demo>
 DemoClient__ApiScope=api://<api-app-id>/.default
 DemoClient__ApimBase=https://<apim-name>.azure-api.net
 DemoClient__ApiVersion=2024-02-01
@@ -316,6 +365,7 @@ DemoClient__Clients__0__AppId=<client-app-id>
 DemoClient__Clients__0__Secret=<client-secret>
 DemoClient__Clients__0__Plan=Enterprise
 DemoClient__Clients__0__DeploymentId=gpt-4o
+DemoClient__Clients__0__TenantId=<tenant-id>
 ```
 
 For local React dashboard development, copy `src/chargeback-ui/.env.sample` to `src/chargeback-ui/.env.local` and set your Entra app values.
@@ -342,6 +392,9 @@ When running via Aspire, connection strings and service discovery are configured
 
 **❓ Multi-region support?**
 ✅ Yes. Azure Container Apps and APIM both support multi-region deployment via the Bicep modules.
+
+**❓ How does multi-tenant billing work?**
+✅ A "customer" is the combination of `clientAppId` (the Entra app registration) and `tenantId` (the Entra directory). A multi-tenant app registered with `AzureADMultipleOrgs` can serve users from any Entra tenant — each tenant gets its own plan assignment, quota, rate limits, and billing. Use `-SecondaryTenantId` when deploying to pre-register a second tenant for the demo.
 
 **❓ Do I need a Purview/E5 license?**
 ✅ Only if you enable the Purview DLP integration. The core chargeback functionality works without it.

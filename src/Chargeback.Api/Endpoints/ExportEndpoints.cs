@@ -87,11 +87,11 @@ public static class ExportEndpoints
             var summaries = await auditStore.GetBillingSummariesAsync(billingPeriod);
 
             var sb = new StringBuilder();
-            sb.AppendLine("ClientAppId,DisplayName,DeploymentId,Model,PromptTokens,CompletionTokens,TotalTokens,ImageTokens,CostToUs,CostToCustomer,IsOverbilled,RequestCount");
+            sb.AppendLine("ClientAppId,TenantId,DisplayName,DeploymentId,Model,PromptTokens,CompletionTokens,TotalTokens,ImageTokens,CostToUs,CostToCustomer,IsOverbilled,RequestCount");
 
             foreach (var s in summaries)
             {
-                sb.AppendLine($"{Escape(s.ClientAppId)},{Escape(s.DisplayName)},{Escape(s.DeploymentId)},{Escape(s.Model)},{s.PromptTokens},{s.CompletionTokens},{s.TotalTokens},{s.ImageTokens},{s.CostToUs:F4},{s.CostToCustomer:F4},{s.IsOverbilled},{s.RequestCount}");
+                sb.AppendLine($"{Escape(s.ClientAppId)},{Escape(s.TenantId)},{Escape(s.DisplayName)},{Escape(s.DeploymentId)},{Escape(s.Model)},{s.PromptTokens},{s.CompletionTokens},{s.TotalTokens},{s.ImageTokens},{s.CostToUs:F4},{s.CostToCustomer:F4},{s.IsOverbilled},{s.RequestCount}");
             }
 
             var csvBytes = Encoding.UTF8.GetBytes(sb.ToString());
@@ -111,31 +111,35 @@ public static class ExportEndpoints
     }
 
     private static async Task<IResult> ExportClientAudit(
-        string clientAppId, int year, int month,
+        string clientAppId, string tenantId, int year, int month,
         IAuditStore auditStore,
         ILogger<ExportPeriodsResponse> logger)
     {
         if (string.IsNullOrWhiteSpace(clientAppId))
             return Results.BadRequest("clientAppId is required");
+        if (string.IsNullOrWhiteSpace(tenantId))
+            return Results.BadRequest("tenantId is required");
         if (month < 1 || month > 12 || year < 2020 || year > 2099)
             return Results.BadRequest("Invalid year or month");
 
         try
         {
             var billingPeriod = $"{year:D4}-{month:D2}";
-            var logs = await auditStore.GetClientAuditLogsAsync(clientAppId, billingPeriod);
+            var customerKey = $"{clientAppId}:{tenantId}";
+            var logs = await auditStore.GetClientAuditLogsAsync(customerKey, billingPeriod);
 
             var sb = new StringBuilder();
-            sb.AppendLine("Timestamp,DeploymentId,Model,PromptTokens,CompletionTokens,TotalTokens,ImageTokens,CostToUs,CostToCustomer,IsOverbilled,StatusCode");
+            sb.AppendLine("Timestamp,ClientAppId,TenantId,DeploymentId,Model,PromptTokens,CompletionTokens,TotalTokens,ImageTokens,CostToUs,CostToCustomer,IsOverbilled,StatusCode");
 
             foreach (var log in logs)
             {
-                sb.AppendLine($"{log.Timestamp:O},{Escape(log.DeploymentId)},{Escape(log.Model)},{log.PromptTokens},{log.CompletionTokens},{log.TotalTokens},{log.ImageTokens},{log.CostToUs},{log.CostToCustomer},{log.IsOverbilled},{log.StatusCode}");
+                sb.AppendLine($"{log.Timestamp:O},{Escape(log.ClientAppId)},{Escape(log.TenantId)},{Escape(log.DeploymentId)},{Escape(log.Model)},{log.PromptTokens},{log.CompletionTokens},{log.TotalTokens},{log.ImageTokens},{log.CostToUs},{log.CostToCustomer},{log.IsOverbilled},{log.StatusCode}");
             }
 
             var csvBytes = Encoding.UTF8.GetBytes(sb.ToString());
             var safeClientId = clientAppId.Replace(":", "-").Replace("/", "-");
-            var filename = $"client-audit-{safeClientId}-{billingPeriod}.csv";
+            var safeTenantId = tenantId.Replace(":", "-").Replace("/", "-");
+            var filename = $"client-audit-{safeClientId}-{safeTenantId}-{billingPeriod}.csv";
 
             var isCurrentMonth = year == DateTime.UtcNow.Year && month == DateTime.UtcNow.Month;
             var fileResult = Results.File(csvBytes, contentType: "text/csv", fileDownloadName: filename);
@@ -144,8 +148,8 @@ public static class ExportEndpoints
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error exporting client audit for {ClientAppId} {Year}-{Month}",
-                clientAppId, year, month);
+            logger.LogError(ex, "Error exporting client audit for {ClientAppId}/{TenantId} {Year}-{Month}",
+                clientAppId, tenantId, year, month);
             return Results.Json(new { error = "Failed to export client audit" },
                 statusCode: StatusCodes.Status500InternalServerError);
         }

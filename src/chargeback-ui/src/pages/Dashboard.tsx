@@ -4,6 +4,7 @@ import type { LogEntry, RequestLogEntry, ClientAssignment, PlanData } from "../t
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
 import { Progress } from "../components/ui/progress"
 import { Badge } from "../components/ui/badge"
+import { Button } from "../components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table"
 import { DollarSign, Coins, Users, Cpu, ArrowUpDown, TrendingUp, ScrollText } from "lucide-react"
 import {
@@ -24,7 +25,7 @@ const MODEL_COLORS: Record<string, { variant: "blue" | "green" | "teal" | "amber
 }
 
 const PIE_COLORS = ["#0078D4", "#00B7C3", "#107C10", "#FFB900", "#D13438", "#8764B8", "#005A9E", "#106EBE"]
-const MAX_CLIENT_OVERVIEW_CARDS = 10
+const MAX_CLIENT_OVERVIEW_CARDS = 4
 
 function getModelStyle(model: string | null | undefined) {
   if (!model) return { variant: "secondary" as const, hex: "#6b7280" }
@@ -58,7 +59,7 @@ function getDeploymentStyle(deploymentId: string | null | undefined) {
 type SortKey = keyof LogEntry
 type SortDir = "asc" | "desc"
 
-export function Dashboard({ onSelectClient }: { onSelectClient?: (clientAppId: string) => void }) {
+export function Dashboard({ onSelectClient }: { onSelectClient?: (clientAppId: string, tenantId: string) => void }) {
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [requestLogs, setRequestLogs] = useState<RequestLogEntry[]>([])
   const [clientNameMap, setClientNameMap] = useState<Map<string, string>>(new Map())
@@ -68,6 +69,8 @@ export function Dashboard({ onSelectClient }: { onSelectClient?: (clientAppId: s
   const [error, setError] = useState<string | null>(null)
   const [sortKey, setSortKey] = useState<SortKey>("totalCost")
   const [sortDir, setSortDir] = useState<SortDir>("desc")
+  const [usagePage, setUsagePage] = useState(0)
+  const USAGE_PAGE_SIZE = 10
   const { resolvedTheme } = useTheme()
 
   const loadData = useCallback(async () => {
@@ -84,7 +87,7 @@ export function Dashboard({ onSelectClient }: { onSelectClient?: (clientAppId: s
       const clientList = (clientsRes.clients ?? []) as ClientAssignment[]
       const nameMap = new Map<string, string>()
       for (const c of clientList) {
-        if (c.displayName) nameMap.set(c.clientAppId, c.displayName)
+        if (c.displayName) nameMap.set(`${c.clientAppId}:${c.tenantId}`, c.displayName)
       }
       setClientNameMap(nameMap)
       setClients(clientList)
@@ -116,7 +119,7 @@ export function Dashboard({ onSelectClient }: { onSelectClient?: (clientAppId: s
   const totalCostToUs = logs.reduce((s, e) => s + (parseFloat((e.costToUs ?? "0").replace(/[^0-9.-]/g, "")) || 0), 0)
   const totalRevenue = logs.reduce((s, e) => s + (parseFloat((e.costToCustomer ?? "0").replace(/[^0-9.-]/g, "")) || 0), 0)
   const totalTokens = logs.reduce((s, e) => s + e.totalTokens, 0)
-  const uniqueClients = new Set(logs.map((e) => e.clientAppId)).size
+  const uniqueClients = new Set(logs.map((e) => `${e.clientAppId}:${e.tenantId}`)).size
   const activeModels = new Set(logs.map((e) => e.model ?? "unknown")).size
 
   // Chart data: Cost by deployment
@@ -130,10 +133,11 @@ export function Dashboard({ onSelectClient }: { onSelectClient?: (clientAppId: s
     .map(([deploymentId, cost]) => ({ deploymentId, cost: +cost.toFixed(4) }))
     .sort((a, b) => b.cost - a.cost)
 
-  // Chart data: Tokens by client (use display names)
+  // Chart data: Tokens by client (use display names, keyed by customer)
   const tokensByClient = Object.entries(
     logs.reduce<Record<string, number>>((acc, e) => {
-      const displayName = clientNameMap.get(e.clientAppId) ?? e.clientAppId
+      const customerKey = `${e.clientAppId}:${e.tenantId}`
+      const displayName = clientNameMap.get(customerKey) ?? e.clientAppId
       const name = displayName.length > 16 ? displayName.slice(0, 14) + "…" : displayName
       acc[name] = (acc[name] ?? 0) + e.totalTokens
       return acc
@@ -193,10 +197,11 @@ export function Dashboard({ onSelectClient }: { onSelectClient?: (clientAppId: s
   // Per-client cost aggregation for client overview cards
   const costByClient = new Map<string, { costToUs: number; costToCustomer: number }>()
   for (const entry of logs) {
-    const existing = costByClient.get(entry.clientAppId) ?? { costToUs: 0, costToCustomer: 0 }
+    const customerKey = `${entry.clientAppId}:${entry.tenantId}`
+    const existing = costByClient.get(customerKey) ?? { costToUs: 0, costToCustomer: 0 }
     existing.costToUs += parseFloat((entry.costToUs ?? "0").replace(/[^0-9.-]/g, "")) || 0
     existing.costToCustomer += parseFloat((entry.costToCustomer ?? "0").replace(/[^0-9.-]/g, "")) || 0
-    costByClient.set(entry.clientAppId, existing)
+    costByClient.set(customerKey, existing)
   }
 
   const clientsByUtilization = [...clients].sort((a, b) => {
@@ -223,6 +228,7 @@ export function Dashboard({ onSelectClient }: { onSelectClient?: (clientAppId: s
   })
 
   const toggleSort = (key: SortKey) => {
+    setUsagePage(0)
     if (sortKey === key) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"))
     } else {
@@ -230,6 +236,9 @@ export function Dashboard({ onSelectClient }: { onSelectClient?: (clientAppId: s
       setSortDir("desc")
     }
   }
+
+  const usagePageCount = Math.max(1, Math.ceil(sorted.length / USAGE_PAGE_SIZE))
+  const pagedSorted = sorted.slice(usagePage * USAGE_PAGE_SIZE, (usagePage + 1) * USAGE_PAGE_SIZE)
 
   const chartTextColor = resolvedTheme === "dark" ? "#a39e99" : "#71706e"
   const gridColor = resolvedTheme === "dark" ? "#3b3a39" : "#e1dfdd"
@@ -267,7 +276,7 @@ export function Dashboard({ onSelectClient }: { onSelectClient?: (clientAppId: s
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Revenue (Customer)</CardTitle>
+            <CardTitle className="text-sm font-medium">Overbilled Revenue</CardTitle>
             <TrendingUp className="h-4 w-4 text-[#00B7C3]" />
           </CardHeader>
           <CardContent>
@@ -325,20 +334,23 @@ export function Dashboard({ onSelectClient }: { onSelectClient?: (clientAppId: s
               const quota = plan?.monthlyTokenQuota ?? 0
               const usage = client.currentPeriodUsage
               const pct = quota > 0 ? (usage / quota) * 100 : 0
-              const clientCosts = costByClient.get(client.clientAppId)
+              const clientCosts = costByClient.get(`${client.clientAppId}:${client.tenantId}`)
 
               return (
-                <Card key={client.clientAppId} className="relative overflow-hidden">
+                <Card key={`${client.clientAppId}:${client.tenantId}`} className="relative overflow-hidden">
                   <CardHeader className="pb-3">
                     <div className="flex items-center justify-between">
                       <button
                         className="text-left cursor-pointer"
-                        onClick={() => onSelectClient?.(client.clientAppId)}
+                        onClick={() => onSelectClient?.(client.clientAppId, client.tenantId)}
                       >
                         <CardTitle className="text-lg hover:text-[#0078D4] transition-colors">
                           {client.displayName || client.clientAppId}
                         </CardTitle>
                         <p className="text-xs text-muted-foreground font-mono mt-0.5">{client.clientAppId}</p>
+                        {client.tenantId && (
+                          <p className="text-[10px] text-muted-foreground/70 font-mono">tenant: {client.tenantId}</p>
+                        )}
                       </button>
                       {plan && <Badge variant="blue">{plan.name}</Badge>}
                     </div>
@@ -547,6 +559,7 @@ export function Dashboard({ onSelectClient }: { onSelectClient?: (clientAppId: s
                 {(
                   [
                     ["clientAppId", "Client App"],
+                    ["tenantId", "Tenant"],
                     ["deploymentId", "Deployment"],
                     ["model", "Model"],
                     ["promptTokens", "Prompt Tokens"],
@@ -572,28 +585,29 @@ export function Dashboard({ onSelectClient }: { onSelectClient?: (clientAppId: s
               </TableRow>
             </TableHeader>
             <TableBody>
-              {sorted.length === 0 ? (
+              {pagedSorted.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={10} className="text-center text-muted-foreground py-8">
+                  <TableCell colSpan={11} className="text-center text-muted-foreground py-8">
                     No usage entries found.
                   </TableCell>
                 </TableRow>
               ) : (
-                sorted.map((entry, idx) => {
+                pagedSorted.map((entry, idx) => {
                   const deploymentStyle = getDeploymentStyle(entry.deploymentId)
                   return (
                     <TableRow key={`${entry.clientAppId}-${entry.deploymentId}-${idx}`}>
                       <TableCell>
                         <button
                           className="text-left text-[#0078D4] hover:underline cursor-pointer"
-                          onClick={() => onSelectClient?.(entry.clientAppId)}
+                          onClick={() => onSelectClient?.(entry.clientAppId, entry.tenantId)}
                         >
-                          <span className="block text-sm font-medium">{clientNameMap.get(entry.clientAppId) ?? entry.clientAppId}</span>
-                          {clientNameMap.has(entry.clientAppId) && (
+                          <span className="block text-sm font-medium">{clientNameMap.get(`${entry.clientAppId}:${entry.tenantId}`) ?? entry.clientAppId}</span>
+                          {clientNameMap.has(`${entry.clientAppId}:${entry.tenantId}`) && (
                             <span className="block font-mono text-[10px] text-muted-foreground">{entry.clientAppId}</span>
                           )}
                         </button>
                       </TableCell>
+                      <TableCell className="font-mono text-xs text-muted-foreground">{entry.tenantId}</TableCell>
                       <TableCell>
                         <Badge variant={deploymentStyle.variant}>{entry.deploymentId || "unknown"}</Badge>
                       </TableCell>
@@ -615,6 +629,21 @@ export function Dashboard({ onSelectClient }: { onSelectClient?: (clientAppId: s
               )}
             </TableBody>
           </Table>
+          {sorted.length > USAGE_PAGE_SIZE && (
+            <div className="flex items-center justify-between pt-4 border-t mt-4">
+              <span className="text-sm text-muted-foreground">
+                Showing {usagePage * USAGE_PAGE_SIZE + 1}–{Math.min((usagePage + 1) * USAGE_PAGE_SIZE, sorted.length)} of {sorted.length} entries
+              </span>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" disabled={usagePage === 0} onClick={() => setUsagePage((p) => p - 1)}>
+                  Previous
+                </Button>
+                <Button variant="outline" size="sm" disabled={usagePage >= usagePageCount - 1} onClick={() => setUsagePage((p) => p + 1)}>
+                  Next
+                </Button>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
       {/* Request Log */}
@@ -654,9 +683,9 @@ export function Dashboard({ onSelectClient }: { onSelectClient?: (clientAppId: s
                     <TableCell>
                       <button
                         className="text-left text-[#0078D4] hover:underline cursor-pointer"
-                        onClick={() => onSelectClient?.(req.clientAppId)}
+                        onClick={() => onSelectClient?.(req.clientAppId, req.tenantId)}
                       >
-                        <span className="block text-sm">{req.clientDisplayName || clientNameMap.get(req.clientAppId) || req.clientAppId}</span>
+                        <span className="block text-sm">{req.clientDisplayName || clientNameMap.get(`${req.clientAppId}:${req.tenantId}`) || req.clientAppId}</span>
                       </button>
                     </TableCell>
                     <TableCell>

@@ -13,9 +13,9 @@
 <policies>
 	<inbound>
 		<base />
-		<!-- Validate Entra ID (Azure AD) JWT token -->
+		<!-- Validate Entra ID (Azure AD) JWT token — uses /common for multi-tenant support -->
 		<validate-jwt header-name="Authorization" failed-validation-httpcode="401" failed-validation-error-message="Unauthorized. Access token is missing or invalid.">
-			<openid-config url="https://login.microsoftonline.com/{{EntraTenantId}}/.well-known/openid-configuration" />
+			<openid-config url="https://login.microsoftonline.com/common/.well-known/openid-configuration" />
 			<required-claims>
 				<claim name="aud" match="all">
 					<value>{{ExpectedAudience}}</value>
@@ -39,7 +39,7 @@
 		<!-- Pre-check: verify client has a valid plan and is within quota BEFORE calling OpenAI -->
 		<set-variable name="containerAppBaseUrl" value="{{ContainerAppUrl}}" />
 		<send-request mode="new" response-variable-name="precheckResponse" timeout="10" ignore-error="true">
-			<set-url>@((string)context.Variables["containerAppBaseUrl"] + "/api/precheck/" + (string)context.Variables["clientAppId"] + "?deploymentId=" + (string)context.Variables["deploymentId"])</set-url>
+			<set-url>@((string)context.Variables["containerAppBaseUrl"] + "/api/precheck/" + (string)context.Variables["clientAppId"] + "/" + (string)context.Variables["tenantId"] + "?deploymentId=" + (string)context.Variables["deploymentId"])</set-url>
 			<set-method>GET</set-method>
 			<set-header name="Authorization" exists-action="override">
 				<value>@("Bearer " + (string)context.Variables["msi-access-token"])</value>

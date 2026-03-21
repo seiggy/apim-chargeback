@@ -9,15 +9,16 @@ public static class PrecheckEndpoints
 {
     public static IEndpointRouteBuilder MapPrecheckEndpoints(this IEndpointRouteBuilder routes)
     {
-        routes.MapGet("/api/precheck/{clientAppId}", Precheck)
+        routes.MapGet("/api/precheck/{clientAppId}/{tenantId}", Precheck)
             .WithName("Precheck")
-            .WithDescription("Pre-authorize a client request — checks plan, quota, and rate limits")
+            .WithDescription("Pre-authorize a client+tenant request — checks plan, quota, and rate limits")
             .RequireAuthorization("ApimPolicy");
         return routes;
     }
 
     private static async Task<IResult> Precheck(
         string clientAppId,
+        string tenantId,
         HttpContext context,
         IConnectionMultiplexer redis,
         IUsagePolicyStore usagePolicyStore,
@@ -26,20 +27,20 @@ public static class PrecheckEndpoints
         var db = redis.GetDatabase();
 
         // 1. Check client assignment exists
-        var clientValue = await db.StringGetAsync(RedisKeys.Client(clientAppId));
+        var clientValue = await db.StringGetAsync(RedisKeys.Client(clientAppId, tenantId));
         if (!clientValue.HasValue)
         {
             return Results.Json(
-                new { error = "Client not authorized — no plan assigned", clientAppId },
+                new { error = "Client not authorized — no plan assigned", clientAppId, tenantId },
                 statusCode: StatusCodes.Status401Unauthorized);
         }
 
         var assignment = JsonSerializer.Deserialize<ClientPlanAssignment>((string)clientValue!, JsonConfig.Default);
         if (assignment is null)
         {
-            logger.LogError("Invalid client assignment payload for {ClientAppId}", clientAppId);
+            logger.LogError("Invalid client assignment payload for {ClientAppId}/{TenantId}", clientAppId, tenantId);
             return Results.Json(
-                new { error = "Client assignment is invalid", clientAppId },
+                new { error = "Client assignment is invalid", clientAppId, tenantId },
                 statusCode: StatusCodes.Status500InternalServerError);
         }
 
@@ -105,7 +106,7 @@ public static class PrecheckEndpoints
 
         if (plan.RequestsPerMinuteLimit > 0)
         {
-            var rpmKey = RedisKeys.RateLimitRpm(clientAppId, minuteWindow);
+            var rpmKey = RedisKeys.RateLimitRpm(clientAppId, tenantId, minuteWindow);
             currentRpm = await db.StringIncrementAsync(rpmKey);
             if (currentRpm == 1)
                 await db.KeyExpireAsync(rpmKey, TimeSpan.FromSeconds(120));
@@ -119,7 +120,7 @@ public static class PrecheckEndpoints
 
         if (plan.TokensPerMinuteLimit > 0)
         {
-            var tpmKey = RedisKeys.RateLimitTpm(clientAppId, minuteWindow);
+            var tpmKey = RedisKeys.RateLimitTpm(clientAppId, tenantId, minuteWindow);
             currentTpm = (long)(await db.StringGetAsync(tpmKey));
             if (currentTpm >= plan.TokensPerMinuteLimit)
             {
@@ -129,6 +130,6 @@ public static class PrecheckEndpoints
             }
         }
 
-        return Results.Ok(new { status = "authorized", clientAppId, plan = plan.Name, usage = effectiveUsage, limit = plan.MonthlyTokenQuota, currentRpm, rpmLimit = plan.RequestsPerMinuteLimit, currentTpm, tpmLimit = plan.TokensPerMinuteLimit });
+        return Results.Ok(new { status = "authorized", clientAppId, tenantId, plan = plan.Name, usage = effectiveUsage, limit = plan.MonthlyTokenQuota, currentRpm, rpmLimit = plan.RequestsPerMinuteLimit, currentTpm, tpmLimit = plan.TokensPerMinuteLimit });
     }
 }

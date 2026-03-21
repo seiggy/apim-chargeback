@@ -14,10 +14,11 @@ const BAR_COLORS = ["#0078D4", "#00B7C3", "#107C10", "#FFB900", "#D13438", "#876
 
 interface ClientDetailProps {
   clientAppId: string
+  tenantId: string
   onBack: () => void
 }
 
-export function ClientDetail({ clientAppId, onBack }: ClientDetailProps) {
+export function ClientDetail({ clientAppId, tenantId, onBack }: ClientDetailProps) {
   const [usage, setUsage] = useState<ClientUsageResponse | null>(null)
   const [traces, setTraces] = useState<TraceRecord[]>([])
   const [loading, setLoading] = useState(true)
@@ -27,8 +28,8 @@ export function ClientDetail({ clientAppId, onBack }: ClientDetailProps) {
   const loadData = useCallback(async () => {
     try {
       const [usageRes, tracesRes] = await Promise.all([
-        fetchClientUsage(clientAppId),
-        fetchClientTraces(clientAppId),
+        fetchClientUsage(clientAppId, tenantId),
+        fetchClientTraces(clientAppId, tenantId),
       ])
       setUsage(usageRes)
       setTraces(tracesRes.traces ?? [])
@@ -38,7 +39,7 @@ export function ClientDetail({ clientAppId, onBack }: ClientDetailProps) {
     } finally {
       setLoading(false)
     }
-  }, [clientAppId])
+  }, [clientAppId, tenantId])
 
   useEffect(() => {
     loadData()
@@ -149,6 +150,7 @@ export function ClientDetail({ clientAppId, onBack }: ClientDetailProps) {
       <div className="flex items-center gap-3 flex-wrap">
         <h2 className="text-xl font-bold">Client Detail</h2>
         <code className="text-sm font-mono bg-muted px-2 py-1 rounded">{clientAppId}</code>
+        <code className="text-sm font-mono bg-muted px-2 py-1 rounded text-muted-foreground">{tenantId}</code>
         {assignment?.displayName && (
           <span className="text-muted-foreground">— {assignment.displayName}</span>
         )}

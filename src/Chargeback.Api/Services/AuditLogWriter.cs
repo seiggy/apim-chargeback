@@ -116,6 +116,7 @@ public sealed class AuditLogWriter : BackgroundService
         var documents = batch.Select(item => new AuditLogDocument
         {
             Id = Guid.NewGuid().ToString("N"),
+            CustomerKey = $"{item.ClientAppId}:{item.TenantId}",
             ClientAppId = item.ClientAppId,
             TenantId = item.TenantId,
             Audience = item.Audience,

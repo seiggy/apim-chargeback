@@ -127,8 +127,8 @@ export async function fetchClients(): Promise<ClientsResponse> {
   return res.json();
 }
 
-export async function assignClient(clientAppId: string, data: ClientAssignRequest): Promise<any> {
-  const res = await authFetch(`${API_BASE}/api/clients/${encodeURIComponent(clientAppId)}`, {
+export async function assignClient(clientAppId: string, tenantId: string, data: ClientAssignRequest): Promise<any> {
+  const res = await authFetch(`${API_BASE}/api/clients/${encodeURIComponent(clientAppId)}/${encodeURIComponent(tenantId)}`, {
     method: "PUT",
     body: JSON.stringify(data),
   });
@@ -136,21 +136,21 @@ export async function assignClient(clientAppId: string, data: ClientAssignReques
   return res.json();
 }
 
-export async function removeClient(clientAppId: string): Promise<void> {
-  const res = await authFetch(`${API_BASE}/api/clients/${encodeURIComponent(clientAppId)}`, {
+export async function removeClient(clientAppId: string, tenantId: string): Promise<void> {
+  const res = await authFetch(`${API_BASE}/api/clients/${encodeURIComponent(clientAppId)}/${encodeURIComponent(tenantId)}`, {
     method: "DELETE",
   });
   if (!res.ok) throw new Error(`Failed to remove client: ${res.statusText}`);
 }
 
-export async function fetchClientUsage(clientAppId: string): Promise<ClientUsageResponse> {
-  const res = await authFetch(`${API_BASE}/api/clients/${encodeURIComponent(clientAppId)}/usage`);
+export async function fetchClientUsage(clientAppId: string, tenantId: string): Promise<ClientUsageResponse> {
+  const res = await authFetch(`${API_BASE}/api/clients/${encodeURIComponent(clientAppId)}/${encodeURIComponent(tenantId)}/usage`);
   if (!res.ok) throw new Error(`Failed to fetch client usage: ${res.statusText}`);
   return res.json();
 }
 
-export async function fetchClientTraces(clientAppId: string): Promise<ClientTracesResponse> {
-  const res = await authFetch(`${API_BASE}/api/clients/${encodeURIComponent(clientAppId)}/traces`);
+export async function fetchClientTraces(clientAppId: string, tenantId: string): Promise<ClientTracesResponse> {
+  const res = await authFetch(`${API_BASE}/api/clients/${encodeURIComponent(clientAppId)}/${encodeURIComponent(tenantId)}/traces`);
   if (!res.ok) throw new Error(`Failed to fetch client traces: ${res.statusText}`);
   return res.json();
 }
@@ -191,8 +191,8 @@ export async function downloadBillingSummary(year: number, month: number): Promi
   await triggerBlobDownload(res);
 }
 
-export async function downloadClientAudit(clientAppId: string, year: number, month: number): Promise<void> {
-  const res = await authFetch(`${API_BASE}/api/export/client-audit?clientAppId=${encodeURIComponent(clientAppId)}&year=${year}&month=${month}`);
+export async function downloadClientAudit(clientAppId: string, tenantId: string, year: number, month: number): Promise<void> {
+  const res = await authFetch(`${API_BASE}/api/export/client-audit?clientAppId=${encodeURIComponent(clientAppId)}&tenantId=${encodeURIComponent(tenantId)}&year=${year}&month=${month}`);
   if (!res.ok) throw new Error(`Failed to download client audit: ${res.statusText}`);
   await triggerBlobDownload(res);
 }

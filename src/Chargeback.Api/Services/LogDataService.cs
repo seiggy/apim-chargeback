@@ -76,7 +76,7 @@ public sealed class LogDataService : ILogDataService
     {
         var db = _redis.GetDatabase();
         var server = _redis.GetServers().First();
-        var keys = server.Keys(pattern: RedisKeys.LogEntryPattern).ToArray();
+        var keys = server.Keys(pattern: RedisKeys.LogEntryPrefix).ToArray();
 
         logger.LogInformation("Fetched {KeyCount} log keys from Redis", keys.Length);
 
@@ -96,7 +96,7 @@ public sealed class LogDataService : ILogDataService
                 if (cached is null) continue;
 
                 var cost = _calculator.CalculateCost(cached);
-                _metrics.RecordCost((double)cost, cached.TenantId, cached.Model ?? "unknown");
+                _metrics.RecordCost((double)cost, cached.TenantId, cached.ClientAppId, cached.Model ?? "unknown");
 
                 logs.Add(new LogEntry
                 {
@@ -141,7 +141,10 @@ public sealed class LogDataService : ILogDataService
             {
                 var assignment = JsonSerializer.Deserialize<ClientPlanAssignment>((string)val!, JsonConfig.Default);
                 if (assignment is not null)
-                    clientDisplayNames[assignment.ClientAppId] = assignment.DisplayName ?? assignment.ClientAppId;
+                {
+                    var customerKey = RedisKeys.CustomerKey(assignment.ClientAppId, assignment.TenantId);
+                    clientDisplayNames[customerKey] = assignment.DisplayName ?? $"{assignment.ClientAppId}/{assignment.TenantId}";
+                }
             }
             catch (JsonException) { }
         }
@@ -153,7 +156,12 @@ public sealed class LogDataService : ILogDataService
         foreach (var traceKey in traceKeys)
         {
             var keyStr = traceKey.ToString();
-            var clientAppId = keyStr.Length > 7 ? keyStr[7..] : keyStr;
+            // traces:{clientAppId}:{tenantId} — extract customer key after "traces:" prefix
+            var customerKey = keyStr.Length > 7 ? keyStr[7..] : keyStr;
+            // Split customerKey into clientAppId and tenantId
+            var separatorIdx = customerKey.IndexOf(':');
+            var clientAppId = separatorIdx > 0 ? customerKey[..separatorIdx] : customerKey;
+            var tenantId = separatorIdx > 0 ? customerKey[(separatorIdx + 1)..] : string.Empty;
 
             var items = await db.ListRangeAsync(traceKey, 0, 199);
             foreach (var item in items)
@@ -167,8 +175,8 @@ public sealed class LogDataService : ILogDataService
                     {
                         Timestamp = trace.Timestamp,
                         ClientAppId = clientAppId,
-                        ClientDisplayName = clientDisplayNames.GetValueOrDefault(clientAppId, clientAppId),
-                        TenantId = string.Empty,
+                        ClientDisplayName = clientDisplayNames.GetValueOrDefault(customerKey, customerKey),
+                        TenantId = tenantId,
                         DeploymentId = trace.DeploymentId,
                         Model = trace.Model,
                         PromptTokens = trace.PromptTokens,

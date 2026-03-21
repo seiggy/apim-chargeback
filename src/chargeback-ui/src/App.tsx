@@ -14,7 +14,7 @@ import { Activity, LogIn } from "lucide-react"
 
 function App() {
   const [activeTab, setActiveTab] = useState("dashboard")
-  const [selectedClient, setSelectedClient] = useState<string | null>(null)
+  const [selectedClient, setSelectedClient] = useState<{ clientAppId: string; tenantId: string } | null>(null)
   const isAuthenticated = useIsAuthenticated()
   const { instance, inProgress } = useMsal()
 
@@ -50,15 +50,15 @@ function App() {
   if (selectedClient) {
     return (
       <Layout activeTab={activeTab} onTabChange={(tab) => { setSelectedClient(null); setActiveTab(tab); }}>
-        <ClientDetail clientAppId={selectedClient} onBack={() => setSelectedClient(null)} />
+        <ClientDetail clientAppId={selectedClient.clientAppId} tenantId={selectedClient.tenantId} onBack={() => setSelectedClient(null)} />
       </Layout>
     )
   }
 
   return (
     <Layout activeTab={activeTab} onTabChange={setActiveTab}>
-      {activeTab === "dashboard" && <Dashboard onSelectClient={setSelectedClient} />}
-      {activeTab === "clients" && <Clients onSelectClient={setSelectedClient} />}
+      {activeTab === "dashboard" && <Dashboard onSelectClient={(clientAppId, tenantId) => setSelectedClient({ clientAppId, tenantId })} />}
+      {activeTab === "clients" && <Clients onSelectClient={(clientAppId, tenantId) => setSelectedClient({ clientAppId, tenantId })} />}
       {activeTab === "plans" && <Plans />}
       {activeTab === "pricing" && <Pricing />}
       {activeTab === "export" && <Export />}

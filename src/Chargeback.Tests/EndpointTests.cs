@@ -221,7 +221,7 @@ public class EndpointTests : IClassFixture<ChargebackApiFactory>
         SeedPlan("plan-a", "Plan A");
 
         var body = new ClientAssignRequest { PlanId = "plan-a", DisplayName = "My App" };
-        var response = await _client.PutAsJsonAsync("/api/clients/app-001", body, JsonOpts);
+        var response = await _client.PutAsJsonAsync("/api/clients/app-001/tenant-1", body, JsonOpts);
         response.EnsureSuccessStatusCode();
 
         var assignment = await response.Content.ReadFromJsonAsync<ClientPlanAssignment>(JsonOpts);
@@ -239,7 +239,7 @@ public class EndpointTests : IClassFixture<ChargebackApiFactory>
         SeedLog("tenant-x", "compute-client", "gpt-4o-mini", model: "gpt-4o-mini", totalTokens: 30);
 
         var body = new ClientAssignRequest { PlanId = "plan-usage-compute", DisplayName = "Compute Client" };
-        var response = await _client.PutAsJsonAsync("/api/clients/compute-client", body, JsonOpts);
+        var response = await _client.PutAsJsonAsync("/api/clients/compute-client/tenant-x", body, JsonOpts);
         response.EnsureSuccessStatusCode();
 
         var assignment = await response.Content.ReadFromJsonAsync<ClientPlanAssignment>(JsonOpts);
@@ -251,7 +251,7 @@ public class EndpointTests : IClassFixture<ChargebackApiFactory>
     public async Task AssignClient_NonExistentPlan_ReturnsBadRequest()
     {
         var body = new ClientAssignRequest { PlanId = "no-plan" };
-        var response = await _client.PutAsJsonAsync("/api/clients/app-002", body, JsonOpts);
+        var response = await _client.PutAsJsonAsync("/api/clients/app-002/tenant-1", body, JsonOpts);
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
@@ -273,14 +273,14 @@ public class EndpointTests : IClassFixture<ChargebackApiFactory>
     public async Task DeleteClient_Existing_ReturnsOk()
     {
         SeedClientAssignment("client-del", "plan-x", "Del");
-        var response = await _client.DeleteAsync("/api/clients/client-del");
+        var response = await _client.DeleteAsync("/api/clients/client-del/tenant-1");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
     [Fact]
     public async Task DeleteClient_NonExistent_Returns404()
     {
-        var response = await _client.DeleteAsync("/api/clients/ghost-client");
+        var response = await _client.DeleteAsync("/api/clients/ghost-client/tenant-1");
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
@@ -329,7 +329,7 @@ public class EndpointTests : IClassFixture<ChargebackApiFactory>
         Assert.Equal(40, updated.AggregatedLogRetentionDays);
         Assert.Equal(45, updated.TraceRetentionDays);
 
-        var assignResponse = await _client.PutAsJsonAsync("/api/clients/settings-client", new ClientAssignRequest
+        var assignResponse = await _client.PutAsJsonAsync("/api/clients/settings-client/tenant-1", new ClientAssignRequest
         {
             PlanId = "plan-settings",
             DisplayName = "Settings Client"
@@ -397,7 +397,7 @@ public class EndpointTests : IClassFixture<ChargebackApiFactory>
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         var minuteWindow = DateTimeOffset.UtcNow.ToUnixTimeSeconds() / 60;
-        var tpmValue = await _factory.Redis.Database.StringGetAsync(RedisKeys.RateLimitTpm("tpm-ingest-client", minuteWindow));
+        var tpmValue = await _factory.Redis.Database.StringGetAsync(RedisKeys.RateLimitTpm("tpm-ingest-client", "tenant-1", minuteWindow));
         Assert.Equal(90L, (long)tpmValue);
     }
 
@@ -412,7 +412,7 @@ public class EndpointTests : IClassFixture<ChargebackApiFactory>
     [Fact]
     public async Task IngestLog_InvalidClientPayload_Returns500()
     {
-        _factory.Redis.SeedString(RedisKeys.Client("bad-client"), "null");
+        _factory.Redis.SeedString(RedisKeys.Client("bad-client", "tenant-1"), "null");
 
         var response = await _client.PostAsJsonAsync("/api/log", CreateLogRequest("bad-client"), JsonOpts);
         Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
@@ -444,7 +444,7 @@ public class EndpointTests : IClassFixture<ChargebackApiFactory>
         var responses = await Task.WhenAll(tasks);
         Assert.All(responses, response => Assert.Equal(HttpStatusCode.OK, response.StatusCode));
 
-        var assignmentJson = await _factory.Redis.Database.StringGetAsync(RedisKeys.Client("atomic-client"));
+        var assignmentJson = await _factory.Redis.Database.StringGetAsync(RedisKeys.Client("atomic-client", "tenant-1"));
         var assignment = JsonSerializer.Deserialize<ClientPlanAssignment>((string)assignmentJson!, JsonOpts);
         Assert.NotNull(assignment);
 
@@ -452,7 +452,7 @@ public class EndpointTests : IClassFixture<ChargebackApiFactory>
         Assert.Equal(expectedTotal, assignment.CurrentPeriodUsage);
         Assert.Equal(expectedTotal, assignment.DeploymentUsage["gpt-4o"]);
 
-        var logJson = await _factory.Redis.Database.StringGetAsync(RedisKeys.LogEntry("tenant-1", "atomic-client", "gpt-4o"));
+        var logJson = await _factory.Redis.Database.StringGetAsync(RedisKeys.LogEntry("atomic-client", "tenant-1", "gpt-4o"));
         var cachedLog = JsonSerializer.Deserialize<CachedLogData>((string)logJson!, JsonOpts);
         Assert.NotNull(cachedLog);
         Assert.Equal(expectedTotal, cachedLog.TotalTokens);
@@ -466,7 +466,7 @@ public class EndpointTests : IClassFixture<ChargebackApiFactory>
         SeedPlan("plan-pre", "Precheck Plan", monthlyTokenQuota: 10_000_000);
         SeedClientAssignment("pre-client", "plan-pre", "Pre Client");
 
-        var response = await _client.GetAsync("/api/precheck/pre-client");
+        var response = await _client.GetAsync("/api/precheck/pre-client/tenant-1");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
         var json = await response.Content.ReadAsStringAsync();
@@ -476,7 +476,7 @@ public class EndpointTests : IClassFixture<ChargebackApiFactory>
     [Fact]
     public async Task Precheck_UnknownClient_Returns401()
     {
-        var response = await _client.GetAsync("/api/precheck/no-such-client");
+        var response = await _client.GetAsync("/api/precheck/no-such-client/tenant-1");
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
@@ -486,7 +486,7 @@ public class EndpointTests : IClassFixture<ChargebackApiFactory>
         SeedPlan("plan-quota", "Quota Plan", monthlyTokenQuota: 100, allowOverbilling: false);
         SeedClientAssignment("quota-client", "plan-quota", "Quota Client", currentPeriodUsage: 200);
 
-        var response = await _client.GetAsync("/api/precheck/quota-client");
+        var response = await _client.GetAsync("/api/precheck/quota-client/tenant-1");
         Assert.Equal(HttpStatusCode.TooManyRequests, response.StatusCode);
     }
 
@@ -506,7 +506,7 @@ public class EndpointTests : IClassFixture<ChargebackApiFactory>
             "Deploy Client",
             deploymentUsage: new Dictionary<string, long> { ["gpt-4o"] = 50 });
 
-        var response = await _client.GetAsync("/api/precheck/deploy-client?deploymentId=gpt-4o");
+        var response = await _client.GetAsync("/api/precheck/deploy-client/tenant-1?deploymentId=gpt-4o");
         Assert.Equal(HttpStatusCode.TooManyRequests, response.StatusCode);
     }
 
@@ -520,10 +520,10 @@ public class EndpointTests : IClassFixture<ChargebackApiFactory>
             monthlyTokenQuota: 10_000_000);
         SeedClientAssignment("rpm-client", "plan-rpm", "RPM Client");
 
-        var firstResponse = await _client.GetAsync("/api/precheck/rpm-client");
+        var firstResponse = await _client.GetAsync("/api/precheck/rpm-client/tenant-1");
         Assert.Equal(HttpStatusCode.OK, firstResponse.StatusCode);
 
-        var secondResponse = await _client.GetAsync("/api/precheck/rpm-client");
+        var secondResponse = await _client.GetAsync("/api/precheck/rpm-client/tenant-1");
         Assert.Equal(HttpStatusCode.TooManyRequests, secondResponse.StatusCode);
     }
 
@@ -538,9 +538,9 @@ public class EndpointTests : IClassFixture<ChargebackApiFactory>
         SeedClientAssignment("tpm-client", "plan-tpm", "TPM Client");
 
         var minuteWindow = DateTimeOffset.UtcNow.ToUnixTimeSeconds() / 60;
-        _factory.Redis.SeedString(RedisKeys.RateLimitTpm("tpm-client", minuteWindow), "100");
+        _factory.Redis.SeedString(RedisKeys.RateLimitTpm("tpm-client", "tenant-1", minuteWindow), "100");
 
-        var response = await _client.GetAsync("/api/precheck/tpm-client");
+        var response = await _client.GetAsync("/api/precheck/tpm-client/tenant-1");
         Assert.Equal(HttpStatusCode.TooManyRequests, response.StatusCode);
     }
 
@@ -565,7 +565,7 @@ public class EndpointTests : IClassFixture<ChargebackApiFactory>
     public async Task ExportClientAudit_WithoutAuth_ReturnsUnauthorized()
     {
         using var anonClient = _factory.CreateClient();
-        var response = await anonClient.GetAsync("/api/export/client-audit?clientAppId=test&year=2026&month=3");
+        var response = await anonClient.GetAsync("/api/export/client-audit?clientAppId=test&tenantId=tenant-1&year=2026&month=3");
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
@@ -719,7 +719,7 @@ public class EndpointTests : IClassFixture<ChargebackApiFactory>
     [Fact]
     public async Task GetClientUsage_UnknownClient_Returns404()
     {
-        var response = await _client.GetAsync("/api/clients/no-client/usage");
+        var response = await _client.GetAsync("/api/clients/no-client/tenant-1/usage");
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
@@ -727,15 +727,15 @@ public class EndpointTests : IClassFixture<ChargebackApiFactory>
     public async Task GetClientUsage_ReturnsUsageCostsAndMeters()
     {
         SeedPlan("plan-client-usage", "Client Usage Plan");
-        SeedClientAssignment("usage-client", "plan-client-usage", "Usage Client");
+        SeedClientAssignment("usage-client", "plan-client-usage", "Usage Client", tenantId: "tenant-usage");
         SeedLog("tenant-usage", "usage-client", "gpt-4o", model: "gpt-4o", totalTokens: 120, promptTokens: 80, completionTokens: 40, costToUs: 1.2000m);
         SeedLog("tenant-usage", "usage-client", "gpt-4o-mini", model: "gpt-4o-mini", totalTokens: 60, promptTokens: 30, completionTokens: 30, costToUs: 0.3000m);
 
         var minuteWindow = DateTimeOffset.UtcNow.ToUnixTimeSeconds() / 60;
-        _factory.Redis.SeedString(RedisKeys.RateLimitRpm("usage-client", minuteWindow), "3");
-        _factory.Redis.SeedString(RedisKeys.RateLimitTpm("usage-client", minuteWindow), "180");
+        _factory.Redis.SeedString(RedisKeys.RateLimitRpm("usage-client", "tenant-usage", minuteWindow), "3");
+        _factory.Redis.SeedString(RedisKeys.RateLimitTpm("usage-client", "tenant-usage", minuteWindow), "180");
 
-        var response = await _client.GetAsync("/api/clients/usage-client/usage");
+        var response = await _client.GetAsync("/api/clients/usage-client/tenant-usage/usage");
         response.EnsureSuccessStatusCode();
 
         var payload = await response.Content.ReadFromJsonAsync<ClientUsageResponse>(JsonOpts);
@@ -760,13 +760,13 @@ public class EndpointTests : IClassFixture<ChargebackApiFactory>
         Assert.Equal(HttpStatusCode.OK, first.StatusCode);
         Assert.Equal(HttpStatusCode.OK, second.StatusCode);
 
-        var usageResponse = await _client.GetAsync("/api/clients/trace-align-client/usage");
+        var usageResponse = await _client.GetAsync("/api/clients/trace-align-client/tenant-1/usage");
         usageResponse.EnsureSuccessStatusCode();
         var usage = await usageResponse.Content.ReadFromJsonAsync<ClientUsageResponse>(JsonOpts);
         Assert.NotNull(usage);
         Assert.NotNull(usage.Assignment);
 
-        var tracesResponse = await _client.GetAsync("/api/clients/trace-align-client/traces");
+        var tracesResponse = await _client.GetAsync("/api/clients/trace-align-client/tenant-1/traces");
         tracesResponse.EnsureSuccessStatusCode();
         var tracesPayload = await tracesResponse.Content.ReadFromJsonAsync<ClientTracesResponse>(JsonOpts);
         Assert.NotNull(tracesPayload);
@@ -788,7 +788,7 @@ public class EndpointTests : IClassFixture<ChargebackApiFactory>
             new TraceRecord { Timestamp = DateTime.UtcNow, DeploymentId = "gpt-4o", TotalTokens = 20 },
             new TraceRecord { Timestamp = DateTime.UtcNow.AddMinutes(-1), DeploymentId = "gpt-4o", TotalTokens = 15 });
 
-        var response = await _client.GetAsync("/api/clients/trace-order-client/traces");
+        var response = await _client.GetAsync("/api/clients/trace-order-client/tenant-1/traces");
         response.EnsureSuccessStatusCode();
 
         var payload = await response.Content.ReadFromJsonAsync<ClientTracesResponse>(JsonOpts);
@@ -837,11 +837,13 @@ public class EndpointTests : IClassFixture<ChargebackApiFactory>
 
     private void SeedClientAssignment(string clientAppId, string planId, string displayName,
         long currentPeriodUsage = 0,
-        Dictionary<string, long>? deploymentUsage = null)
+        Dictionary<string, long>? deploymentUsage = null,
+        string tenantId = "tenant-1")
     {
         var assignment = new ClientPlanAssignment
         {
             ClientAppId = clientAppId,
+            TenantId = tenantId,
             PlanId = planId,
             DisplayName = displayName,
             CurrentPeriodStart = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1, 0, 0, 0, DateTimeKind.Utc),
@@ -849,7 +851,7 @@ public class EndpointTests : IClassFixture<ChargebackApiFactory>
             DeploymentUsage = deploymentUsage ?? new Dictionary<string, long>(),
             LastUpdated = DateTime.UtcNow
         };
-        _factory.Redis.SeedString(RedisKeys.Client(clientAppId), JsonSerializer.Serialize(assignment, JsonOpts));
+        _factory.Redis.SeedString(RedisKeys.Client(clientAppId, tenantId), JsonSerializer.Serialize(assignment, JsonOpts));
     }
 
     private static LogIngestRequest CreateLogRequest(string clientAppId, int totalTokens = 150)
@@ -904,14 +906,14 @@ public class EndpointTests : IClassFixture<ChargebackApiFactory>
         };
 
         _factory.Redis.SeedString(
-            RedisKeys.LogEntry(tenantId, clientAppId, deploymentId),
+            RedisKeys.LogEntry(clientAppId, tenantId, deploymentId),
             JsonSerializer.Serialize(entry, JsonOpts));
     }
 
     private void SeedTraces(string clientAppId, params TraceRecord[] traces)
     {
         _factory.Redis.SeedList(
-            RedisKeys.Traces(clientAppId),
+            RedisKeys.Traces(clientAppId, "tenant-1"),
             traces.Select(trace => JsonSerializer.Serialize(trace, JsonOpts)).ToArray());
     }
 }

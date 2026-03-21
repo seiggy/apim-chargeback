@@ -80,7 +80,7 @@ public static class LogIngestEndpoints
             var logCacheTtl = TimeSpan.FromDays(usagePolicy.AggregatedLogRetentionDays);
             var traceCacheTtl = TimeSpan.FromDays(usagePolicy.TraceRetentionDays);
             var lockToken = (RedisValue)Guid.NewGuid().ToString("N");
-            if (!await TryAcquireClientUpdateLock(db, ingestRequest.ClientAppId, lockToken, logger))
+            if (!await TryAcquireClientUpdateLock(db, ingestRequest.ClientAppId, ingestRequest.TenantId, lockToken, logger))
             {
                 return Results.Json(
                     new { error = "Client usage update is busy, retry request" },
@@ -94,7 +94,7 @@ public static class LogIngestEndpoints
             {
                 // --- 1. Client Authorization Check ---
                 IResult? authError;
-                (clientAssignment, authError) = await AuthorizeClient(db, ingestRequest.ClientAppId, logger);
+                (clientAssignment, authError) = await AuthorizeClient(db, ingestRequest.ClientAppId, ingestRequest.TenantId, logger);
                 if (authError is not null) return authError;
 
                 // --- 2. Plan Lookup ---
@@ -106,7 +106,7 @@ public static class LogIngestEndpoints
                 var minuteWindow = now.ToUnixTimeSeconds() / 60;
                 var totalTokensInRequest = usage?.TotalTokens ?? 0;
 
-                await UpdateTpmCounter(db, plan!, ingestRequest.ClientAppId, minuteWindow, totalTokensInRequest, logger);
+                await UpdateTpmCounter(db, plan!, ingestRequest.ClientAppId, ingestRequest.TenantId, minuteWindow, totalTokensInRequest, logger);
 
                 // --- 4. Quota Check + Overbilling ---
                 ResetBillingPeriodIfNeeded(clientAssignment!, usagePolicy.BillingCycleStartDay, DateTime.UtcNow);
@@ -154,12 +154,12 @@ public static class LogIngestEndpoints
 
                 clientAssignment.LastUpdated = DateTime.UtcNow;
 
-                var clientKey = RedisKeys.Client(ingestRequest.ClientAppId);
+                var clientKey = RedisKeys.Client(ingestRequest.ClientAppId, ingestRequest.TenantId);
                 var updatedClientValue = JsonSerializer.Serialize(clientAssignment, JsonConfig.Default);
                 await db.StringSetAsync(clientKey, updatedClientValue);
 
                 // --- Aggregate into log cache ---
-                var cacheKey = RedisKeys.LogEntry(logData.TenantId, logData.ClientAppId, logData.DeploymentId);
+                var cacheKey = RedisKeys.LogEntry(logData.ClientAppId, logData.TenantId, logData.DeploymentId);
                 var existingValue = await db.StringGetAsync(cacheKey);
 
                 if (existingValue.HasValue)
@@ -199,7 +199,7 @@ public static class LogIngestEndpoints
                     StatusCode = 200
                 };
                 var traceJson = JsonSerializer.Serialize(trace, JsonConfig.Default);
-                var traceKey = RedisKeys.Traces(ingestRequest.ClientAppId);
+                var traceKey = RedisKeys.Traces(ingestRequest.ClientAppId, ingestRequest.TenantId);
                 await db.ListLeftPushAsync(traceKey, traceJson);
                 await db.ListTrimAsync(traceKey, 0, 99);
                 await db.KeyExpireAsync(traceKey, traceCacheTtl);
@@ -220,11 +220,11 @@ public static class LogIngestEndpoints
             }
             finally
             {
-                await ReleaseClientUpdateLock(db, ingestRequest.ClientAppId, lockToken, logger);
+                await ReleaseClientUpdateLock(db, ingestRequest.ClientAppId, ingestRequest.TenantId, lockToken, logger);
             }
 
             // Emit custom metrics
-            metrics.RecordTokensProcessed(usage?.TotalTokens ?? 0, ingestRequest.TenantId, model, ingestRequest.DeploymentId);
+            metrics.RecordTokensProcessed(usage?.TotalTokens ?? 0, ingestRequest.TenantId, ingestRequest.ClientAppId, model, ingestRequest.DeploymentId);
             metrics.RecordRequest(ingestRequest.TenantId, ingestRequest.ClientAppId, model);
 
             // Emit Purview audit event (fire-and-forget via background channel)
@@ -262,10 +262,11 @@ public static class LogIngestEndpoints
     private static async Task<bool> TryAcquireClientUpdateLock(
         IDatabase db,
         string clientAppId,
+        string tenantId,
         RedisValue lockToken,
         ILogger logger)
     {
-        var lockKey = RedisKeys.ClientUpdateLock(clientAppId);
+        var lockKey = RedisKeys.ClientUpdateLock(clientAppId, tenantId);
 
         for (var attempt = 0; attempt < ClientUpdateLockMaxAttempts; attempt++)
         {
@@ -275,40 +276,41 @@ public static class LogIngestEndpoints
             await Task.Delay(ClientUpdateLockRetryDelay);
         }
 
-        logger.LogWarning("Failed to acquire client usage lock for {ClientAppId}", clientAppId);
+        logger.LogWarning("Failed to acquire client usage lock for {ClientAppId}/{TenantId}", clientAppId, tenantId);
         return false;
     }
 
     private static async Task ReleaseClientUpdateLock(
         IDatabase db,
         string clientAppId,
+        string tenantId,
         RedisValue lockToken,
         ILogger logger)
     {
         try
         {
-            var lockKey = RedisKeys.ClientUpdateLock(clientAppId);
+            var lockKey = RedisKeys.ClientUpdateLock(clientAppId, tenantId);
             await db.LockReleaseAsync(lockKey, lockToken);
         }
         catch (RedisException ex)
         {
-            logger.LogWarning(ex, "Failed to release client usage lock for {ClientAppId}", clientAppId);
+            logger.LogWarning(ex, "Failed to release client usage lock for {ClientAppId}/{TenantId}", clientAppId, tenantId);
         }
     }
 
     private static async Task<(ClientPlanAssignment? assignment, IResult? error)> AuthorizeClient(
-        IDatabase db, string clientAppId, ILogger logger)
+        IDatabase db, string clientAppId, string tenantId, ILogger logger)
     {
-        var clientValue = await db.StringGetAsync(RedisKeys.Client(clientAppId));
+        var clientValue = await db.StringGetAsync(RedisKeys.Client(clientAppId, tenantId));
         if (!clientValue.HasValue)
         {
-            logger.LogWarning("Unauthorized client: {ClientAppId} — no plan assigned", clientAppId);
+            logger.LogWarning("Unauthorized client: {ClientAppId}/{TenantId} — no plan assigned", clientAppId, tenantId);
             return (null, Results.Json(new { error = "Client not authorized — no plan assigned" }, statusCode: StatusCodes.Status401Unauthorized));
         }
         var assignment = JsonSerializer.Deserialize<ClientPlanAssignment>((string)clientValue!, JsonConfig.Default);
         if (assignment is null)
         {
-            logger.LogError("Invalid client assignment payload for {ClientAppId}", clientAppId);
+            logger.LogError("Invalid client assignment payload for {ClientAppId}/{TenantId}", clientAppId, tenantId);
             return (null, Results.Json(new { error = "Client assignment is invalid" }, statusCode: StatusCodes.Status500InternalServerError));
         }
         return (assignment, null);
@@ -333,17 +335,17 @@ public static class LogIngestEndpoints
     }
 
     private static async Task UpdateTpmCounter(
-        IDatabase db, PlanData plan, string clientAppId, long minuteWindow, long totalTokens, ILogger logger)
+        IDatabase db, PlanData plan, string clientAppId, string tenantId, long minuteWindow, long totalTokens, ILogger logger)
     {
         if (plan.TokensPerMinuteLimit > 0 && totalTokens > 0)
         {
-            var tpmKey = RedisKeys.RateLimitTpm(clientAppId, minuteWindow);
+            var tpmKey = RedisKeys.RateLimitTpm(clientAppId, tenantId, minuteWindow);
             var currentTpm = await db.StringIncrementAsync(tpmKey, totalTokens);
             if (currentTpm == totalTokens)
                 await db.KeyExpireAsync(tpmKey, TimeSpan.FromSeconds(120));
 
-            logger.LogDebug("TPM updated: {ClientAppId} = {Current}/{Limit}",
-                clientAppId, currentTpm, plan.TokensPerMinuteLimit);
+            logger.LogDebug("TPM updated: {ClientAppId}/{TenantId} = {Current}/{Limit}",
+                clientAppId, tenantId, currentTpm, plan.TokensPerMinuteLimit);
         }
     }
 

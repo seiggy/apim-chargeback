@@ -110,6 +110,7 @@ export interface PlanUpdateRequest {
 
 export interface ClientAssignment {
   clientAppId: string;
+  tenantId: string;
   planId: string;
   displayName: string;
   currentPeriodStart: string;
@@ -190,6 +191,7 @@ export interface ExportPeriod {
 
 export interface ExportClient {
   clientAppId: string;
+  tenantId: string;
   displayName: string;
 }
 

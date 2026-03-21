@@ -1,25 +1,34 @@
 param redisCacheName string
 param location string
 
-resource redisCache 'Microsoft.Cache/Redis@2024-03-01' = {
+resource redisEnterprise 'Microsoft.Cache/redisEnterprise@2025-04-01' = {
   name: redisCacheName
   location: location
   properties: {
-    sku: {
-      name: 'Standard'
-      family: 'C'
-      capacity: 1
-    }
-    enableNonSslPort: false
-    disableAccessKeyAuthentication: true
-    redisConfiguration: {
-      'aad-enabled': 'true'
-    }
+    highAvailability: 'Disabled'
+    minimumTlsVersion: '1.2'
+  }
+  sku: {
+    name: 'Balanced_B0'
   }
   identity: {
     type: 'SystemAssigned'
-  } 
+  }
 }
-output redisCacheName string = redisCache.name
-output redisHostName string = '${redisCache.name}.redis.cache.windows.net'
-output redisPrincipalId string = redisCache.identity.principalId
+
+resource defaultDatabase 'Microsoft.Cache/redisEnterprise/databases@2025-04-01' = {
+  parent: redisEnterprise
+  name: 'default'
+  properties: {
+    clientProtocol: 'Encrypted'
+    clusteringPolicy: 'OSSCluster'
+    evictionPolicy: 'VolatileLRU'
+    accessKeysAuthentication: 'Disabled'
+    port: 10000
+  }
+}
+
+output redisCacheName string = redisEnterprise.name
+output redisHostName string = '${redisEnterprise.name}.${location}.redis.azure.net'
+output redisPort int = 10000
+output redisPrincipalId string = redisEnterprise.identity.principalId

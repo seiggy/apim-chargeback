@@ -35,10 +35,11 @@ public sealed class ChargebackMetrics
             description: "Cost distribution per chargeback entry");
     }
 
-    public void RecordTokensProcessed(long tokens, string tenantId, string model, string deploymentId)
+    public void RecordTokensProcessed(long tokens, string tenantId, string clientAppId, string model, string deploymentId)
     {
         _tokensProcessed.Add(tokens,
             new KeyValuePair<string, object?>("tenant_id", tenantId),
+            new KeyValuePair<string, object?>("client_app_id", clientAppId),
             new KeyValuePair<string, object?>("model", model),
             new KeyValuePair<string, object?>("deployment_id", deploymentId));
     }
@@ -51,10 +52,11 @@ public sealed class ChargebackMetrics
             new KeyValuePair<string, object?>("model", model));
     }
 
-    public void RecordCost(double cost, string tenantId, string model)
+    public void RecordCost(double cost, string tenantId, string clientAppId, string model)
     {
         _costTotal.Record(cost,
             new KeyValuePair<string, object?>("tenant_id", tenantId),
+            new KeyValuePair<string, object?>("client_app_id", clientAppId),
             new KeyValuePair<string, object?>("model", model));
     }
 }

@@ -10,18 +10,19 @@ import { Dialog, DialogHeader, DialogTitle, DialogClose } from "../components/ui
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table"
 import { Pencil, Trash2, Plus, Users } from "lucide-react"
 
-export function Clients({ onSelectClient }: { onSelectClient?: (clientAppId: string) => void }) {
+export function Clients({ onSelectClient }: { onSelectClient?: (clientAppId: string, tenantId: string) => void }) {
   const [plans, setPlans] = useState<PlanData[]>([])
   const [clients, setClients] = useState<ClientAssignment[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
+  const [deleteConfirm, setDeleteConfirm] = useState<{ clientAppId: string; tenantId: string } | null>(null)
 
   // Client dialog state
   const [clientDialogOpen, setClientDialogOpen] = useState(false)
-  const [editingClientId, setEditingClientId] = useState<string | null>(null)
+  const [editingClientId, setEditingClientId] = useState<{ clientAppId: string; tenantId: string } | null>(null)
   const [clientAppIdInput, setClientAppIdInput] = useState("")
+  const [clientTenantIdInput, setClientTenantIdInput] = useState("")
   const [clientPlanId, setClientPlanId] = useState("")
   const [clientDisplayName, setClientDisplayName] = useState("")
 
@@ -43,14 +44,16 @@ export function Clients({ onSelectClient }: { onSelectClient?: (clientAppId: str
   const openAssignClient = () => {
     setEditingClientId(null)
     setClientAppIdInput("")
+    setClientTenantIdInput("")
     setClientPlanId(plans.length > 0 ? plans[0].id : "")
     setClientDisplayName("")
     setClientDialogOpen(true)
   }
 
   const openEditClient = (c: ClientAssignment) => {
-    setEditingClientId(c.clientAppId)
+    setEditingClientId({ clientAppId: c.clientAppId, tenantId: c.tenantId })
     setClientAppIdInput(c.clientAppId)
+    setClientTenantIdInput(c.tenantId)
     setClientPlanId(c.planId)
     setClientDisplayName(c.displayName)
     setClientDialogOpen(true)
@@ -59,7 +62,9 @@ export function Clients({ onSelectClient }: { onSelectClient?: (clientAppId: str
   const handleSaveClient = async () => {
     setSaving(true)
     try {
-      await assignClient(editingClientId ?? clientAppIdInput, {
+      const appId = editingClientId?.clientAppId ?? clientAppIdInput
+      const tenant = editingClientId?.tenantId ?? clientTenantIdInput
+      await assignClient(appId, tenant, {
         planId: clientPlanId,
         displayName: clientDisplayName || undefined,
       })
@@ -72,9 +77,9 @@ export function Clients({ onSelectClient }: { onSelectClient?: (clientAppId: str
     }
   }
 
-  const handleRemoveClient = async (clientAppId: string) => {
+  const handleRemoveClient = async (clientAppId: string, tenantId: string) => {
     try {
-      await removeClient(clientAppId)
+      await removeClient(clientAppId, tenantId)
       setDeleteConfirm(null)
       await loadData()
     } catch (err) {
@@ -124,6 +129,7 @@ export function Clients({ onSelectClient }: { onSelectClient?: (clientAppId: str
               <TableHeader>
                 <TableRow>
                   <TableHead>Client App ID</TableHead>
+                  <TableHead>Tenant ID</TableHead>
                   <TableHead>Display Name</TableHead>
                   <TableHead>Plan</TableHead>
                   <TableHead>Usage</TableHead>
@@ -138,15 +144,16 @@ export function Clients({ onSelectClient }: { onSelectClient?: (clientAppId: str
                   const quota = plan?.monthlyTokenQuota ?? 1
                   const pct = quota > 0 ? (c.currentPeriodUsage / quota) * 100 : 0
                   return (
-                    <TableRow key={c.clientAppId}>
+                    <TableRow key={`${c.clientAppId}-${c.tenantId}`}>
                       <TableCell>
                         <button
                           className="font-mono text-xs text-[#0078D4] hover:underline cursor-pointer"
-                          onClick={() => onSelectClient?.(c.clientAppId)}
+                          onClick={() => onSelectClient?.(c.clientAppId, c.tenantId)}
                         >
                           {c.clientAppId}
                         </button>
                       </TableCell>
+                      <TableCell className="font-mono text-xs text-muted-foreground">{c.tenantId}</TableCell>
                       <TableCell>{c.displayName || "—"}</TableCell>
                       <TableCell>
                         <Badge variant="blue">{getPlanName(c.planId)}</Badge>
@@ -183,7 +190,7 @@ export function Clients({ onSelectClient }: { onSelectClient?: (clientAppId: str
                           <Button variant="ghost" size="icon" onClick={() => openEditClient(c)}>
                             <Pencil className="h-4 w-4" />
                           </Button>
-                          <Button variant="ghost" size="icon" onClick={() => setDeleteConfirm(c.clientAppId)}>
+                          <Button variant="ghost" size="icon" onClick={() => setDeleteConfirm({ clientAppId: c.clientAppId, tenantId: c.tenantId })}>
                             <Trash2 className="h-4 w-4 text-[#D13438]" />
                           </Button>
                         </div>
@@ -214,6 +221,15 @@ export function Clients({ onSelectClient }: { onSelectClient?: (clientAppId: str
             />
           </div>
           <div className="space-y-2">
+            <label className="text-sm font-medium">Tenant ID</label>
+            <Input
+              value={clientTenantIdInput}
+              onChange={(e) => setClientTenantIdInput(e.target.value)}
+              placeholder="Tenant ID"
+              disabled={!!editingClientId}
+            />
+          </div>
+          <div className="space-y-2">
             <label className="text-sm font-medium">Plan</label>
             <select
               className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -231,7 +247,7 @@ export function Clients({ onSelectClient }: { onSelectClient?: (clientAppId: str
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="outline" onClick={() => setClientDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleSaveClient} disabled={saving || (!editingClientId && !clientAppIdInput) || !clientPlanId}>
+            <Button onClick={handleSaveClient} disabled={saving || (!editingClientId && (!clientAppIdInput || !clientTenantIdInput)) || !clientPlanId}>
               {saving ? "Saving…" : editingClientId ? "Update" : "Assign"}
             </Button>
           </div>
@@ -253,7 +269,7 @@ export function Clients({ onSelectClient }: { onSelectClient?: (clientAppId: str
             <Button
               variant="destructive"
               onClick={() => {
-                if (deleteConfirm) handleRemoveClient(deleteConfirm)
+                if (deleteConfirm) handleRemoveClient(deleteConfirm.clientAppId, deleteConfirm.tenantId)
               }}
             >
               Delete

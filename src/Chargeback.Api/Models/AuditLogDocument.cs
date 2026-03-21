@@ -4,12 +4,18 @@ namespace Chargeback.Api.Models;
 
 /// <summary>
 /// Individual request audit log stored in Cosmos DB for durable financial record-keeping.
-/// Partition key: /clientAppId
+/// Partition key: /customerKey (clientAppId:tenantId)
 /// </summary>
 public sealed class AuditLogDocument
 {
     [JsonPropertyName("id")]
     public string Id { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Synthetic partition key: {clientAppId}:{tenantId}
+    /// </summary>
+    [JsonPropertyName("customerKey")]
+    public string CustomerKey { get; set; } = string.Empty;
 
     [JsonPropertyName("clientAppId")]
     public string ClientAppId { get; set; } = string.Empty;

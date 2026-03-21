@@ -52,17 +52,17 @@ public static class PlanEndpoints
             .WithDescription("List all client plan assignments with current usage")
             .Produces<ClientsResponse>();
 
-        routes.MapPut("/api/clients/{clientAppId}", AssignClient)
+        routes.MapPut("/api/clients/{clientAppId}/{tenantId}", AssignClient)
             .WithName("AssignClient")
-            .WithDescription("Assign or reassign a client to a billing plan")
+            .WithDescription("Assign or reassign a customer (client+tenant) to a billing plan")
             .RequireAuthorization("AdminPolicy")
             .Produces<ClientPlanAssignment>()
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status500InternalServerError);
 
-        routes.MapDelete("/api/clients/{clientAppId}", DeleteClient)
+        routes.MapDelete("/api/clients/{clientAppId}/{tenantId}", DeleteClient)
             .WithName("DeleteClient")
-            .WithDescription("Remove a client plan assignment")
+            .WithDescription("Remove a customer plan assignment")
             .RequireAuthorization("AdminPolicy")
             .Produces(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status404NotFound)
@@ -280,6 +280,9 @@ public static class PlanEndpoints
                     var client = JsonSerializer.Deserialize<ClientPlanAssignment>((string)value!, JsonConfig.Default);
                     if (client is null) continue;
 
+                    // Skip stale keys from pre-migration format (missing tenantId)
+                    if (string.IsNullOrWhiteSpace(client.TenantId)) continue;
+
                     if (client.CurrentPeriodStart != expectedPeriodStart)
                     {
                         client.CurrentPeriodUsage = 0;
@@ -289,8 +292,8 @@ public static class PlanEndpoints
                     }
 
                     var minuteWindow = DateTimeOffset.UtcNow.ToUnixTimeSeconds() / 60;
-                    var rpmVal = await db.StringGetAsync(RedisKeys.RateLimitRpm(client.ClientAppId, minuteWindow));
-                    var tpmVal = await db.StringGetAsync(RedisKeys.RateLimitTpm(client.ClientAppId, minuteWindow));
+                    var rpmVal = await db.StringGetAsync(RedisKeys.RateLimitRpm(client.ClientAppId, client.TenantId, minuteWindow));
+                    var tpmVal = await db.StringGetAsync(RedisKeys.RateLimitTpm(client.ClientAppId, client.TenantId, minuteWindow));
                     client.CurrentRpm = rpmVal.HasValue ? (long)rpmVal : 0;
                     client.CurrentTpm = tpmVal.HasValue ? (long)tpmVal : 0;
 
@@ -313,6 +316,7 @@ public static class PlanEndpoints
 
     private static async Task<IResult> AssignClient(
         string clientAppId,
+        string tenantId,
         ClientAssignRequest body,
         IConnectionMultiplexer redis,
         IUsagePolicyStore usagePolicyStore,
@@ -322,6 +326,9 @@ public static class PlanEndpoints
         {
             if (string.IsNullOrWhiteSpace(clientAppId))
                 return Results.BadRequest("clientAppId is required");
+
+            if (string.IsNullOrWhiteSpace(tenantId))
+                return Results.BadRequest("tenantId is required");
 
             if (string.IsNullOrWhiteSpace(body.PlanId))
                 return Results.BadRequest("planId is required");
@@ -334,56 +341,58 @@ public static class PlanEndpoints
             if (!await db.KeyExistsAsync(planKey))
                 return Results.BadRequest($"Plan '{body.PlanId}' does not exist");
 
-            var currentUsage = await ComputeUsage(db, server, clientAppId, logger);
+            var currentUsage = await ComputeUsage(db, server, clientAppId, tenantId, logger);
 
             var assignment = new ClientPlanAssignment
             {
                 ClientAppId = clientAppId,
+                TenantId = tenantId,
                 PlanId = body.PlanId,
-                DisplayName = body.DisplayName ?? clientAppId,
+                DisplayName = body.DisplayName ?? $"{clientAppId}/{tenantId}",
                 CurrentPeriodStart = BillingPeriodCalculator.GetCurrentPeriodStartUtc(DateTime.UtcNow, usagePolicy.BillingCycleStartDay),
                 CurrentPeriodUsage = currentUsage,
                 OverbilledTokens = 0,
                 LastUpdated = DateTime.UtcNow
             };
 
-            var cacheKey = RedisKeys.Client(clientAppId);
+            var cacheKey = RedisKeys.Client(clientAppId, tenantId);
             var cacheValue = JsonSerializer.Serialize(assignment, JsonConfig.Default);
             await db.StringSetAsync(cacheKey, cacheValue);
 
             logger.LogInformation(
-                "Client assigned: ClientAppId={ClientAppId}, PlanId={PlanId}, Usage={Usage}",
-                clientAppId, body.PlanId, currentUsage);
+                "Client assigned: ClientAppId={ClientAppId}, TenantId={TenantId}, PlanId={PlanId}, Usage={Usage}",
+                clientAppId, tenantId, body.PlanId, currentUsage);
 
             return Results.Json(assignment, JsonConfig.Default);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error assigning client {ClientAppId}", clientAppId);
+            logger.LogError(ex, "Error assigning customer {ClientAppId}/{TenantId}", clientAppId, tenantId);
             return Results.Json(new { error = "Failed to assign client" }, statusCode: StatusCodes.Status500InternalServerError);
         }
     }
 
     private static async Task<IResult> DeleteClient(
         string clientAppId,
+        string tenantId,
         IConnectionMultiplexer redis,
         ILogger<ClientPlanAssignment> logger)
     {
         try
         {
             var db = redis.GetDatabase();
-            var cacheKey = RedisKeys.Client(clientAppId);
+            var cacheKey = RedisKeys.Client(clientAppId, tenantId);
             var deleted = await db.KeyDeleteAsync(cacheKey);
 
             if (!deleted)
-                return Results.NotFound(new { error = $"Client '{clientAppId}' not found" });
+                return Results.NotFound(new { error = $"Customer '{clientAppId}/{tenantId}' not found" });
 
-            logger.LogInformation("Client deleted: ClientAppId={ClientAppId}", clientAppId);
+            logger.LogInformation("Client deleted: ClientAppId={ClientAppId}, TenantId={TenantId}", clientAppId, tenantId);
             return Results.Ok(new { message = "Client assignment deleted successfully" });
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error deleting client {ClientAppId}", clientAppId);
+            logger.LogError(ex, "Error deleting customer {ClientAppId}/{TenantId}", clientAppId, tenantId);
             return Results.Json(new { error = "Failed to delete client" }, statusCode: StatusCodes.Status500InternalServerError);
         }
     }
@@ -462,10 +471,10 @@ public static class PlanEndpoints
         return assignedClientIds;
     }
 
-    private static async Task<long> ComputeUsage(IDatabase db, IServer server, string clientAppId, ILogger logger)
+    private static async Task<long> ComputeUsage(IDatabase db, IServer server, string clientAppId, string tenantId, ILogger logger)
     {
         long usage = 0;
-        var logKeys = server.Keys(pattern: RedisKeys.ClientLogPattern(clientAppId)).ToArray();
+        var logKeys = server.Keys(pattern: RedisKeys.CustomerLogPattern(clientAppId, tenantId)).ToArray();
 
         foreach (var logKey in logKeys)
         {

@@ -58,15 +58,37 @@ public sealed class FakeRedis
                 return _strings.TryGetValue(key, out var val) ? val : RedisValue.Null;
             });
 
+        // All StringSetAsync overloads delegate to the same store logic.
+        Func<NSubstitute.Core.CallInfo, bool> stringSetHandler = ci =>
+        {
+            var key = ((RedisKey)ci[0]).ToString();
+            _strings[key] = (RedisValue)ci[1];
+            return true;
+        };
+
+        // 4-arg: (RedisKey, RedisValue, TimeSpan?, When) — resolves for db.StringSetAsync(key, value) and db.StringSetAsync(key, value, ttl)
+        Database.StringSetAsync(
+                Arg.Any<RedisKey>(), Arg.Any<RedisValue>(),
+                Arg.Any<TimeSpan?>(), Arg.Any<When>())
+            .Returns(stringSetHandler);
+
+        // 5-arg: (RedisKey, RedisValue, TimeSpan?, When, CommandFlags)
+        Database.StringSetAsync(
+                Arg.Any<RedisKey>(), Arg.Any<RedisValue>(),
+                Arg.Any<TimeSpan?>(), Arg.Any<When>(), Arg.Any<CommandFlags>())
+            .Returns(stringSetHandler);
+
+        // 6-arg: (RedisKey, RedisValue, TimeSpan?, bool, When, CommandFlags)
         Database.StringSetAsync(
                 Arg.Any<RedisKey>(), Arg.Any<RedisValue>(),
                 Arg.Any<TimeSpan?>(), Arg.Any<bool>(), Arg.Any<When>(), Arg.Any<CommandFlags>())
-            .Returns(ci =>
-            {
-                var key = ((RedisKey)ci[0]).ToString();
-                _strings[key] = (RedisValue)ci[1];
-                return true;
-            });
+            .Returns(stringSetHandler);
+
+        // Newest overload in newer StackExchange.Redis: (RedisKey, RedisValue, Expiration, ValueCondition, CommandFlags)
+        Database.StringSetAsync(
+                Arg.Any<RedisKey>(), Arg.Any<RedisValue>(),
+                Arg.Any<Expiration>(), Arg.Any<ValueCondition>(), Arg.Any<CommandFlags>())
+            .Returns(stringSetHandler);
 
         Database.StringIncrementAsync(Arg.Any<RedisKey>(), Arg.Any<long>(), Arg.Any<CommandFlags>())
             .Returns(ci =>

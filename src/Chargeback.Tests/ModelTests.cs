@@ -68,9 +68,9 @@ public class ModelTests
         var clientAppId = "app-12345";
         var deploymentId = "gpt-4o";
 
-        var key = RedisKeys.LogEntry(tenantId, clientAppId, deploymentId);
+        var key = RedisKeys.LogEntry(clientAppId, tenantId, deploymentId);
 
-        Assert.Equal("00000000-0000-0000-0000-000000000001-app-12345-gpt-4o", key);
+        Assert.Equal("log:app-12345:00000000-0000-0000-0000-000000000001:gpt-4o", key);
         Assert.Contains(tenantId, key);
         Assert.Contains(clientAppId, key);
         Assert.Contains(deploymentId, key);
@@ -80,10 +80,10 @@ public class ModelTests
     public void RedisKeys_GenerateExpectedPatterns()
     {
         Assert.Equal("plan:abc", RedisKeys.Plan("abc"));
-        Assert.Equal("client:app1", RedisKeys.Client("app1"));
-        Assert.Equal("traces:app1", RedisKeys.Traces("app1"));
+        Assert.Equal("client:app1:tenant1", RedisKeys.Client("app1", "tenant1"));
+        Assert.Equal("traces:app1:tenant1", RedisKeys.Traces("app1", "tenant1"));
         Assert.Equal("pricing:gpt-4o", RedisKeys.Pricing("gpt-4o"));
-        Assert.Equal("ratelimit:rpm:app1:100", RedisKeys.RateLimitRpm("app1", 100));
-        Assert.Equal("ratelimit:tpm:app1:100", RedisKeys.RateLimitTpm("app1", 100));
+        Assert.Equal("ratelimit:rpm:app1:tenant1:100", RedisKeys.RateLimitRpm("app1", "tenant1", 100));
+        Assert.Equal("ratelimit:tpm:app1:tenant1:100", RedisKeys.RateLimitTpm("app1", "tenant1", 100));
     }
 }

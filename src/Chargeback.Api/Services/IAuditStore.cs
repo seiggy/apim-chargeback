@@ -14,7 +14,7 @@ public interface IAuditStore
 
     /// <summary>
     /// Upsert billing summary documents from a batch of audit log items.
-    /// Groups by client+deployment+period and increments totals.
+    /// Groups by customer (client+tenant)+deployment+period and increments totals.
     /// </summary>
     Task UpsertBillingSummariesAsync(IReadOnlyList<AuditLogItem> items, CancellationToken ct = default);
 
@@ -24,9 +24,9 @@ public interface IAuditStore
     Task<List<BillingSummaryDocument>> GetBillingSummariesAsync(string billingPeriod, CancellationToken ct = default);
 
     /// <summary>
-    /// Get all audit log entries for a specific client in a billing period.
+    /// Get all audit log entries for a specific customer in a billing period.
     /// </summary>
-    Task<List<AuditLogDocument>> GetClientAuditLogsAsync(string clientAppId, string billingPeriod, CancellationToken ct = default);
+    Task<List<AuditLogDocument>> GetClientAuditLogsAsync(string customerKey, string billingPeriod, CancellationToken ct = default);
 
     /// <summary>
     /// Get all distinct billing periods that have data.

@@ -48,14 +48,15 @@ foreach (var client in settings.Clients)
 {
     Console.ForegroundColor = ConsoleColor.Yellow;
     Console.WriteLine($"━━━ {client.Name} ━━━");
-    Console.WriteLine($"    App ID: {client.AppId}");
-    Console.WriteLine($"    Plan:   {client.Plan}");
-    Console.WriteLine($"    Agent:  {client.Name} Agent");
+    Console.WriteLine($"    App ID:    {client.AppId}");
+    Console.WriteLine($"    Tenant ID: {client.TenantId}");
+    Console.WriteLine($"    Plan:      {client.Plan}");
+    Console.WriteLine($"    Agent:     {client.Name} Agent");
     Console.ResetColor();
     Console.WriteLine();
 
     Console.Write("  Authenticating with Entra ID... ");
-    var token = await AcquireAccessTokenAsync(client, settings.TenantId, settings.ApiScope);
+    var token = await AcquireAccessTokenAsync(client, client.TenantId, settings.ApiScope);
     if (string.IsNullOrWhiteSpace(token))
     {
         Console.ForegroundColor = ConsoleColor.Red;
@@ -196,20 +197,55 @@ static async Task<string?> AcquireAccessTokenAsync(
 {
     try
     {
-        var msalApp = ConfidentialClientApplicationBuilder
-            .Create(client.AppId)
-            .WithClientSecret(client.Secret)
-            .WithAuthority($"https://login.microsoftonline.com/{tenantId}")
-            .Build();
+        if (client.UseInteractiveAuth)
+        {
+            // Cross-tenant interactive auth: the API and client service principals
+            // must already exist in the target tenant. The setup script or an admin
+            // provisions them via: az ad sp create --id {appId} (run in the target tenant).
+            var apiAppId = apiScope.Replace("api://", "").Replace("/.default", "");
 
-        var authResult = await msalApp
-            .AcquireTokenForClient([apiScope])
-            .ExecuteAsync();
+            Console.ForegroundColor = ConsoleColor.DarkYellow;
+            Console.WriteLine();
+            Console.WriteLine($"    ℹ Cross-tenant auth for tenant {tenantId}.");
+            Console.WriteLine($"    Ensure service principals exist in the target tenant:");
+            Console.WriteLine($"      az ad sp create --id {apiAppId}   # API app");
+            Console.WriteLine($"      az ad sp create --id {client.AppId}   # Client app");
+            Console.ResetColor();
 
-        return authResult.AccessToken;
+            var publicApp = PublicClientApplicationBuilder
+                .Create(client.AppId)
+                .WithAuthority($"https://login.microsoftonline.com/organizations")
+                .WithRedirectUri("http://localhost:29783")
+                .Build();
+
+            var authResult = await publicApp
+                .AcquireTokenInteractive([apiScope.Replace("/.default", "/access_as_user")])
+                .WithPrompt(Microsoft.Identity.Client.Prompt.Consent)
+                .ExecuteAsync();
+
+            return authResult.AccessToken;
+        }
+        else
+        {
+            // Client credentials flow for same-tenant service-to-service auth
+            var msalApp = ConfidentialClientApplicationBuilder
+                .Create(client.AppId)
+                .WithClientSecret(client.Secret)
+                .WithAuthority($"https://login.microsoftonline.com/{tenantId}")
+                .Build();
+
+            var authResult = await msalApp
+                .AcquireTokenForClient([apiScope])
+                .ExecuteAsync();
+
+            return authResult.AccessToken;
+        }
     }
-    catch
+    catch (Exception ex)
     {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine($"✗ {ex.Message}");
+        Console.ResetColor();
         return null;
     }
 }
@@ -411,6 +447,7 @@ file sealed class ApimChatClient(HttpClient http, Uri endpoint, string bearerTok
 file sealed class DemoClientSettings
 {
     public required string TenantId { get; init; }
+    public string? SecondaryTenantId { get; init; }
     public required string ApiScope { get; init; }
     public required string ApimBase { get; init; }
     public required string ApiVersion { get; init; }
@@ -425,12 +462,31 @@ file sealed class DemoClientSettings
         if (!section.Exists())
             throw new InvalidOperationException("Missing 'DemoClient' configuration section. Configure with user secrets or environment variables (DemoClient__*).");
 
+        var defaultTenantId = ReadRequired(section, "TenantId");
+        var secondaryTenantId = section["SecondaryTenantId"];
+
         var clientsSection = section.GetSection("Clients");
         var clients = clientsSection.GetChildren()
-            .Select(ParseClientConfig)
-            .ToArray();
-        if (clients.Length == 0)
+            .Select(c => ParseClientConfig(c, defaultTenantId))
+            .ToList();
+        if (clients.Count == 0)
             throw new InvalidOperationException("Missing DemoClient clients configuration. Add DemoClient:Clients entries.");
+
+        // If a secondary tenant is configured, duplicate multi-tenant clients (all
+        // clients after the first) so the demo generates traffic from both tenants.
+        if (!string.IsNullOrWhiteSpace(secondaryTenantId))
+        {
+            var secondaryClients = clients
+                .Skip(1) // First client is single-tenant; remaining are multi-tenant candidates
+                .Select(c => c with
+                {
+                    Name = $"{c.Name} (Tenant 2)",
+                    TenantId = secondaryTenantId,
+                    UseInteractiveAuth = true
+                })
+                .ToList();
+            clients.AddRange(secondaryClients);
+        }
 
         var prompts = section.GetSection("Prompts")
             .GetChildren()
@@ -448,7 +504,8 @@ file sealed class DemoClientSettings
 
         return new DemoClientSettings
         {
-            TenantId = ReadRequired(section, "TenantId"),
+            TenantId = defaultTenantId,
+            SecondaryTenantId = secondaryTenantId,
             ApiScope = ReadRequired(section, "ApiScope"),
             ApimBase = ReadRequired(section, "ApimBase"),
             ApiVersion = ReadRequired(section, "ApiVersion"),
@@ -459,13 +516,14 @@ file sealed class DemoClientSettings
         };
     }
 
-    private static DemoClientConfig ParseClientConfig(IConfigurationSection section)
+    private static DemoClientConfig ParseClientConfig(IConfigurationSection section, string defaultTenantId)
         => new(
             Name: ReadRequired(section, "Name"),
             AppId: ReadRequired(section, "AppId"),
             Secret: ReadRequired(section, "Secret"),
             Plan: ReadRequired(section, "Plan"),
-            DeploymentId: ReadRequired(section, "DeploymentId"));
+            DeploymentId: ReadRequired(section, "DeploymentId"),
+            TenantId: section["TenantId"] ?? defaultTenantId);
 
     private static string ReadRequired(IConfigurationSection section, string key)
     {
@@ -498,4 +556,6 @@ file sealed record DemoClientConfig(
     string AppId,
     string Secret,
     string Plan,
-    string DeploymentId);
+    string DeploymentId,
+    string TenantId,
+    bool UseInteractiveAuth = false);

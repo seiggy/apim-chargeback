@@ -11,10 +11,12 @@ public sealed class ExportPeriod
 
 /// <summary>
 /// Client summary for a given billing period (for the period selector UI).
+/// A "Customer" is the clientAppId:tenantId combination.
 /// </summary>
 public sealed class ExportClient
 {
     public string ClientAppId { get; set; } = string.Empty;
+    public string TenantId { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
 }
 

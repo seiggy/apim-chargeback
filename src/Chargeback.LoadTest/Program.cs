@@ -15,7 +15,8 @@ using var httpClient = Http.CreateDefaultClient();
 var precheckScenario = Scenario.Create("precheck", async context =>
 {
     var clientAppId = Environment.GetEnvironmentVariable("LOADTEST_CLIENT_APP_ID") ?? "00000000-0000-0000-0000-000000000001";
-    var request = Http.CreateRequest("GET", $"{baseUrl}/api/precheck/{clientAppId}?deploymentId=gpt-4o");
+    var tenantId = Environment.GetEnvironmentVariable("LOADTEST_TENANT_ID") ?? "00000000-0000-0000-0000-000000000000";
+    var request = Http.CreateRequest("GET", $"{baseUrl}/api/precheck/{clientAppId}/{tenantId}?deploymentId=gpt-4o");
     var response = await Http.Send(httpClient, request);
     return response;
 })
@@ -71,7 +72,7 @@ var dashboardScenario = Scenario.Create("dashboard_read", async context =>
 // --- Scenario 4: Combined APIM flow (precheck then log) ---
 var combinedScenario = Scenario.Create("apim_flow", async context =>
 {
-    var precheck = Http.CreateRequest("GET", $"{baseUrl}/api/precheck/{testClientAppId}?deploymentId=gpt-4o");
+    var precheck = Http.CreateRequest("GET", $"{baseUrl}/api/precheck/{testClientAppId}/{testTenantId}?deploymentId=gpt-4o");
     var precheckResp = await Http.Send(httpClient, precheck);
     if (precheckResp.IsError) return precheckResp;
 

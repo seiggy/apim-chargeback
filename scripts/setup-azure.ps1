@@ -16,13 +16,20 @@
     Skip the Bicep deployment (useful when re-running post-deploy steps)
 .PARAMETER SkipDocker
     Skip Docker build/push (useful when image is already in ACR)
+.PARAMETER SecondaryTenantId
+    Optional second Entra tenant ID. When provided, Client 2 (multi-tenant) is also
+    registered for billing under this tenant — useful for demonstrating per-tenant
+    chargeback with a single client app serving multiple organizations.
 .EXAMPLE
     .\setup-azure.ps1 -Location eastus2 -WorkloadName chrgbk
+.EXAMPLE
+    .\setup-azure.ps1 -Location eastus2 -WorkloadName chrgbk -SecondaryTenantId "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 #>
 param(
     [string]$Location = "eastus2",
     [string]$WorkloadName = "chrgbk",
     [string]$ResourceGroupName = "",
+    [string]$SecondaryTenantId = "",
     [switch]$SkipBicep,
     [switch]$SkipDocker
 )
@@ -113,13 +120,11 @@ function Ensure-DelegatedScopeAndConsent {
         [Parameter(Mandatory = $true)][string]$ClientDisplayName
     )
 
-    $existingCountRaw = az ad app show --id $ClientAppId --query "length(requiredResourceAccess[?resourceAppId=='$ApiAppId'].resourceAccess[?id=='$ScopeId' && type=='Scope'])" -o tsv 2>$null
-    $existingCount = 0
-    if (-not [int]::TryParse(($existingCountRaw | Out-String).Trim(), [ref]$existingCount)) {
-        $existingCount = 0
-    }
+    # Check if this API permission already exists using the manifest directly
+    $existingAccess = az ad app show --id $ClientAppId --query "requiredResourceAccess[?resourceAppId=='$ApiAppId'].resourceAccess[].id" -o tsv 2>$null
+    $alreadyHasScope = ($existingAccess -split "`n" | ForEach-Object { $_.Trim() }) -contains $ScopeId
 
-    if ($existingCount -eq 0) {
+    if (-not $alreadyHasScope) {
         Write-Host "    Adding delegated scope permission for $ClientDisplayName..." -ForegroundColor Gray
         az ad app permission add --id $ClientAppId --api $ApiAppId --api-permissions "$ScopeId=Scope" -o none
         if ($LASTEXITCODE -ne 0) { throw "Failed to add delegated API permission for $ClientDisplayName." }
@@ -308,12 +313,24 @@ try {
         $apiObjId = $existingApiApp.id
         Write-Host "    ✓ Reusing existing API app: $apiAppId" -ForegroundColor Green
     } else {
-        $apiApp = az ad app create --display-name "Chargeback API" --sign-in-audience AzureADMyOrg | ConvertFrom-Json
+        $apiApp = az ad app create --display-name "Chargeback API" --sign-in-audience AzureADMultipleOrgs | ConvertFrom-Json
         $apiAppId = $apiApp.appId
         $apiObjId = $apiApp.id
-        Write-Host "    ✓ API app created: $apiAppId" -ForegroundColor Green
+        Write-Host "    ✓ API app created (multi-tenant): $apiAppId" -ForegroundColor Green
 
     }
+
+    # Ensure the API app is multi-tenant (required for cross-tenant delegated auth)
+    az ad app update --id $apiAppId --sign-in-audience AzureADMultipleOrgs 2>$null
+
+    # Add Microsoft Graph openid permission (required for cross-tenant admin consent)
+    $graphOpenIdId = "37f7f235-527c-4136-accd-4a02d197296e"
+    Write-Host "  Ensuring Microsoft Graph openid permission on API app..." -ForegroundColor Gray
+    $apiGraphAccess = az ad app show --id $apiAppId --query "requiredResourceAccess[?resourceAppId=='00000003-0000-0000-c000-000000000000'].resourceAccess[].id" -o tsv 2>$null
+    if (($apiGraphAccess -split "`n" | ForEach-Object { $_.Trim() }) -notcontains $graphOpenIdId) {
+        az ad app permission add --id $apiAppId --api 00000003-0000-0000-c000-000000000000 --api-permissions "$graphOpenIdId=Scope" -o none 2>$null
+    }
+    Write-Host "    ✓ Graph openid permission configured on API app" -ForegroundColor Green
 
     # Ensure Application ID URI is set
     az ad app update --id $apiAppId --identifier-uris "api://$apiAppId"
@@ -514,6 +531,12 @@ try {
     Ensure-ServicePrincipal -AppId $client1AppId -DisplayName "Chargeback Sample Client"
     Ensure-DelegatedScopeAndConsent -ClientAppId $client1AppId -ApiAppId $apiAppId -ScopeId $scopeId -ClientDisplayName "Chargeback Sample Client"
 
+    # Add Microsoft Graph openid permission to Client 1
+    $client1GraphAccess = az ad app show --id $client1AppId --query "requiredResourceAccess[?resourceAppId=='00000003-0000-0000-c000-000000000000'].resourceAccess[].id" -o tsv 2>$null
+    if (($client1GraphAccess -split "`n" | ForEach-Object { $_.Trim() }) -notcontains $graphOpenIdId) {
+        az ad app permission add --id $client1AppId --api 00000003-0000-0000-c000-000000000000 --api-permissions "$graphOpenIdId=Scope" -o none 2>$null
+    }
+
     # Create client secret for client 1
     $client1Secret = az ad app credential reset --id $client1AppId --display-name "setup-script" --years 1 --query "password" -o tsv 2>$null
     if ($client1Secret) {
@@ -544,23 +567,36 @@ try {
     $deploymentOutput["client1ObjId"] = $client1ObjId
     $deploymentOutput["client1Secret"] = $client1Secret
 
-    # --- Client App 2 ---
-    Write-Host "  Creating client app 'Chargeback Demo Client 2'..." -ForegroundColor Gray
+    # --- Client App 2 (Multi-tenant — demonstrates per-tenant billing) ---
+    Write-Host "  Creating client app 'Chargeback Demo Client 2' (multi-tenant)..." -ForegroundColor Gray
 
     $existingClient2 = az ad app list --display-name "Chargeback Demo Client 2" --query "[0]" 2>$null | ConvertFrom-Json
     if ($existingClient2) {
         $client2AppId = $existingClient2.appId
         $client2ObjId = $existingClient2.id
         Write-Host "    ✓ Reusing existing client app 2: $client2AppId" -ForegroundColor Green
+        # Ensure it's multi-tenant
+        az ad app update --id $client2AppId --sign-in-audience AzureADMultipleOrgs 2>$null
+        Write-Host "    ✓ Client 2 updated to multi-tenant (AzureADMultipleOrgs)" -ForegroundColor Green
     } else {
-        $client2 = az ad app create --display-name "Chargeback Demo Client 2" --sign-in-audience AzureADMyOrg | ConvertFrom-Json
+        $client2 = az ad app create --display-name "Chargeback Demo Client 2" --sign-in-audience AzureADMultipleOrgs | ConvertFrom-Json
         $client2AppId = $client2.appId
         $client2ObjId = $client2.id
-        Write-Host "    ✓ Client app 2 created: $client2AppId" -ForegroundColor Green
+        Write-Host "    ✓ Client app 2 created (multi-tenant): $client2AppId" -ForegroundColor Green
     }
 
     Ensure-ServicePrincipal -AppId $client2AppId -DisplayName "Chargeback Demo Client 2"
     Ensure-DelegatedScopeAndConsent -ClientAppId $client2AppId -ApiAppId $apiAppId -ScopeId $scopeId -ClientDisplayName "Chargeback Demo Client 2"
+
+    # Add Microsoft Graph openid permission to Client 2
+    $client2GraphAccess = az ad app show --id $client2AppId --query "requiredResourceAccess[?resourceAppId=='00000003-0000-0000-c000-000000000000'].resourceAccess[].id" -o tsv 2>$null
+    if (($client2GraphAccess -split "`n" | ForEach-Object { $_.Trim() }) -notcontains $graphOpenIdId) {
+        az ad app permission add --id $client2AppId --api 00000003-0000-0000-c000-000000000000 --api-permissions "$graphOpenIdId=Scope" -o none 2>$null
+    }
+
+    # Enable public client flow and add localhost redirect URI for interactive auth (cross-tenant demo)
+    az ad app update --id $client2AppId --public-client-redirect-uris "http://localhost:29783" --enable-id-token-issuance true 2>$null
+    Write-Host "    ✓ Client 2 public client redirect URI configured (http://localhost:29783)" -ForegroundColor Green
 
     # Create client secret for client 2
     $client2Secret = az ad app credential reset --id $client2AppId --display-name "setup-script" --years 1 --query "password" -o tsv 2>$null
@@ -1121,14 +1157,31 @@ try {
     }
 
     # Assign clients to plans
+    # Client 1 is single-tenant — tenantId matches the deployment tenant
     Write-Host "  Assigning clients to plans..." -ForegroundColor Gray
     $client1Body = @{ planId = $entPlan.id; displayName = "Chargeback Sample Client" } | ConvertTo-Json
-    Invoke-RestMethod -Uri "$baseUrl/api/clients/$client1AppId" -Method Put -Body $client1Body -ContentType "application/json" -Headers $authHeaders | Out-Null
-    Write-Host "    ✓ Client 1 → Enterprise plan" -ForegroundColor Green
+    Invoke-RestMethod -Uri "$baseUrl/api/clients/$client1AppId/$tenantId" -Method Put -Body $client1Body -ContentType "application/json" -Headers $authHeaders | Out-Null
+    Write-Host "    ✓ Client 1 → Enterprise plan (tenant: $tenantId)" -ForegroundColor Green
 
+    # Client 2 is multi-tenant — register with the deployment tenant first
     $client2Body = @{ planId = $startPlan.id; displayName = "Chargeback Demo Client 2" } | ConvertTo-Json
-    Invoke-RestMethod -Uri "$baseUrl/api/clients/$client2AppId" -Method Put -Body $client2Body -ContentType "application/json" -Headers $authHeaders | Out-Null
-    Write-Host "    ✓ Client 2 → Starter plan" -ForegroundColor Green
+    Invoke-RestMethod -Uri "$baseUrl/api/clients/$client2AppId/$tenantId" -Method Put -Body $client2Body -ContentType "application/json" -Headers $authHeaders | Out-Null
+    Write-Host "    ✓ Client 2 → Starter plan (tenant: $tenantId)" -ForegroundColor Green
+
+    # If a secondary tenant ID is provided, also register Client 2 for that tenant
+    if (-not [string]::IsNullOrWhiteSpace($SecondaryTenantId)) {
+        # Provision service principals in the secondary tenant
+        Write-Host "  Provisioning service principals in secondary tenant $SecondaryTenantId..." -ForegroundColor Gray
+        Write-Host "    ⚠ You must run the following commands while logged into the secondary tenant:" -ForegroundColor DarkYellow
+        Write-Host "      az login --tenant $SecondaryTenantId" -ForegroundColor Yellow
+        Write-Host "      az ad sp create --id $apiAppId" -ForegroundColor Yellow
+        Write-Host "      az ad sp create --id $client2AppId" -ForegroundColor Yellow
+        Write-Host "      az login --tenant $tenantId   # switch back" -ForegroundColor Yellow
+
+        $client2SecondaryBody = @{ planId = $startPlan.id; displayName = "Chargeback Demo Client 2 (Secondary Tenant)" } | ConvertTo-Json
+        Invoke-RestMethod -Uri "$baseUrl/api/clients/$client2AppId/$SecondaryTenantId" -Method Put -Body $client2SecondaryBody -ContentType "application/json" -Headers $authHeaders | Out-Null
+        Write-Host "    ✓ Client 2 → Starter plan (secondary tenant: $SecondaryTenantId)" -ForegroundColor Green
+    }
 
     $deploymentOutput["enterprisePlanId"] = $entPlan.id
     $deploymentOutput["starterPlanId"] = $startPlan.id
@@ -1152,6 +1205,7 @@ $client1SecretForEnv = if ([string]::IsNullOrWhiteSpace($client1Secret)) { "<cli
 $client2SecretForEnv = if ([string]::IsNullOrWhiteSpace($client2Secret)) { "<client-2-secret>" } else { $client2Secret }
 $demoClientEnv = [ordered]@{
     "DemoClient__TenantId"                 = $tenantId
+    "DemoClient__SecondaryTenantId"        = if ([string]::IsNullOrWhiteSpace($SecondaryTenantId)) { "" } else { $SecondaryTenantId }
     "DemoClient__ApiScope"                 = "api://$apiAppId/.default"
     "DemoClient__ApimBase"                 = "https://$($ApimName).azure-api.net"
     "DemoClient__ApiVersion"               = "2024-02-01"
@@ -1161,11 +1215,13 @@ $demoClientEnv = [ordered]@{
     "DemoClient__Clients__0__Secret"       = $client1SecretForEnv
     "DemoClient__Clients__0__Plan"         = "Enterprise"
     "DemoClient__Clients__0__DeploymentId" = "gpt-4o"
+    "DemoClient__Clients__0__TenantId"     = $tenantId
     "DemoClient__Clients__1__Name"         = "Chargeback Demo Client 2"
     "DemoClient__Clients__1__AppId"        = $client2AppId
     "DemoClient__Clients__1__Secret"       = $client2SecretForEnv
     "DemoClient__Clients__1__Plan"         = "Starter"
     "DemoClient__Clients__1__DeploymentId" = "gpt-4o-mini"
+    "DemoClient__Clients__1__TenantId"     = $tenantId
 }
 foreach ($entry in $demoClientEnv.GetEnumerator()) {
     Set-Item -Path "Env:$($entry.Key)" -Value ([string]$entry.Value)

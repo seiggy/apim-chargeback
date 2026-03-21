@@ -42,26 +42,35 @@ graph LR
 1. **Client sends request** to APIM with a Bearer token (Entra ID JWT).
 2. **APIM validates JWT** using the Entra OpenID Connect metadata endpoint.
 3. **APIM extracts claims** — `tid` (tenant), `appid`/`azp` (client identity), `aud` (audience).
-4. **APIM calls the precheck endpoint** (`/api/precheck`) — the Chargeback API checks the client's plan, quota, and rate limits against Redis.
+4. **APIM calls the precheck endpoint** (`/api/precheck/{clientAppId}/{tenantId}`) — the Chargeback API checks the customer's plan, quota, and rate limits against Redis.
 5. **If precheck returns 401/429**, APIM returns the error to the client. The request is blocked before reaching OpenAI.
 6. **If precheck returns 200**, APIM forwards the request to Azure OpenAI using its managed identity.
 7. **Azure OpenAI responds** with the completion/chat result.
 8. **APIM outbound policy** captures the response and sends a fire-and-forget POST to `/api/log`.
-9. **`/api/log` records usage** — updates token quotas, tracks per-deployment usage, records a trace entry, and calculates customer cost for overbilled tokens.
+9. **`/api/log` records usage** — updates token quotas, tracks per-deployment usage, records a trace entry, and calculates customer cost for overbilled tokens. Usage is tracked per customer (`clientAppId:tenantId`), enabling per-tenant billing for multi-tenant SaaS applications.
 10. **Client receives the OpenAI response** (unmodified).
 
 ## Data Model
 
-All state is stored in Redis with the following key patterns:
+All state is stored in Redis with the following key patterns. A **"Customer"** is uniquely identified by the combination of `clientAppId` (the Entra app registration) and `tenantId` (the Entra directory/organization). This allows a single SaaS application to have per-tenant billing, quotas, and rate limits.
 
 | Entity | Redis Key Pattern | TTL | Description |
 |--------|-------------------|-----|-------------|
 | **Plans** | `plan:{id}` | None (persistent) | Billing configuration — monthly quota, rate limits, overbilling flag, cost rates |
-| **Clients** | `client:{appId}` | None (persistent) | Plan assignment, usage tracking, tenant/app identity |
-| **Usage Logs** | `{tenantId}-{clientAppId}-{deploymentId}` | 24 hours | Aggregated token counts (prompt + completion) per deployment |
-| **Traces** | `traces:{clientAppId}` (list) | 7 days | Individual request records with timestamps, tokens, model, cost |
+| **Clients** | `client:{clientAppId}:{tenantId}` | None (persistent) | Plan assignment, usage tracking — keyed by customer (client+tenant) |
+| **Usage Logs** | `log:{clientAppId}:{tenantId}:{deploymentId}` | Configurable (default 30 days) | Aggregated token counts (prompt + completion) per customer per deployment |
+| **Traces** | `traces:{clientAppId}:{tenantId}` (list) | Configurable (default 30 days) | Individual request records with timestamps, tokens, model, cost |
 | **Pricing** | `pricing:{modelId}` | None (persistent) | Cost rates per model (input/output per million tokens) |
-| **Rate Limits** | `ratelimit:rpm/tpm:{clientAppId}:{minuteBucket}` | 2 minutes | Sliding window counters for RPM and TPM enforcement |
+| **Rate Limits** | `ratelimit:rpm/tpm:{clientAppId}:{tenantId}:{minuteBucket}` | 2 minutes | Sliding window counters for RPM and TPM enforcement per customer |
+
+### Cosmos DB (Durable Storage)
+
+Audit logs and billing summaries are persisted to Cosmos DB for long-term financial record-keeping and export.
+
+| Container | Partition Key | TTL | Description |
+|-----------|--------------|-----|-------------|
+| **audit-logs** | `/customerKey` (`{clientAppId}:{tenantId}`) | 36 months | Individual request audit records |
+| **billing-summaries** | `/customerKey` (`{clientAppId}:{tenantId}`) | 36 months | Monthly aggregates per customer+deployment |
 
 ## Security Architecture
 

@@ -51,7 +51,7 @@ param minReplicas int = 1
 @maxValue(30)
 param maxReplicas int = 10
 
-resource redisCache 'Microsoft.Cache/Redis@2024-03-01' existing = {
+resource redisEnterprise 'Microsoft.Cache/redisEnterprise@2025-04-01' existing = {
   name: redisCacheName
   scope: resourceGroup()
 }
@@ -121,7 +121,7 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
             }
             {
               name: 'ConnectionStrings__redis'
-              value: '${redisCache.name}.redis.cache.windows.net:6380,ssl=True,abortConnect=False'
+              value: '${redisEnterprise.name}.${location}.redis.azure.net:10000,ssl=True,abortConnect=False'
             }
             {
               name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'

@@ -12,16 +12,16 @@ public static class ClientDetailEndpoints
 {
     public static IEndpointRouteBuilder MapClientDetailEndpoints(this IEndpointRouteBuilder routes)
     {
-        routes.MapGet("/api/clients/{clientAppId}/usage", GetClientUsage)
+        routes.MapGet("/api/clients/{clientAppId}/{tenantId}/usage", GetClientUsage)
             .WithName("GetClientUsage")
-            .WithDescription("Get per-client usage report including costs and rate limits")
+            .WithDescription("Get per-customer usage report including costs and rate limits")
             .Produces<ClientUsageResponse>()
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status500InternalServerError);
 
-        routes.MapGet("/api/clients/{clientAppId}/traces", GetClientTraces)
+        routes.MapGet("/api/clients/{clientAppId}/{tenantId}/traces", GetClientTraces)
             .WithName("GetClientTraces")
-            .WithDescription("Get recent trace records for a client")
+            .WithDescription("Get recent trace records for a customer")
             .Produces<ClientTracesResponse>()
             .Produces(StatusCodes.Status500InternalServerError);
 
@@ -30,6 +30,7 @@ public static class ClientDetailEndpoints
 
     private static async Task<IResult> GetClientUsage(
         string clientAppId,
+        string tenantId,
         IConnectionMultiplexer redis,
         IUsagePolicyStore usagePolicyStore,
         ILogger<ClientUsageResponse> logger)
@@ -40,13 +41,13 @@ public static class ClientDetailEndpoints
             var server = redis.GetServers().First();
             var usagePolicy = await usagePolicyStore.GetAsync(db);
 
-            var clientValue = await db.StringGetAsync(RedisKeys.Client(clientAppId));
+            var clientValue = await db.StringGetAsync(RedisKeys.Client(clientAppId, tenantId));
             if (!clientValue.HasValue)
-                return Results.NotFound(new { error = $"Client '{clientAppId}' not found" });
+                return Results.NotFound(new { error = $"Customer '{clientAppId}/{tenantId}' not found" });
 
             var assignment = JsonSerializer.Deserialize<ClientPlanAssignment>((string)clientValue!, JsonConfig.Default);
             if (assignment is null)
-                return Results.NotFound(new { error = $"Client '{clientAppId}' not found" });
+                return Results.NotFound(new { error = $"Customer '{clientAppId}/{tenantId}' not found" });
 
             var expectedPeriodStart = BillingPeriodCalculator.GetCurrentPeriodStartUtc(DateTime.UtcNow, usagePolicy.BillingCycleStartDay);
             if (assignment.CurrentPeriodStart != expectedPeriodStart)
@@ -62,7 +63,7 @@ public static class ClientDetailEndpoints
             if (planValue.HasValue)
                 plan = JsonSerializer.Deserialize<PlanData>((string)planValue!, JsonConfig.Default);
 
-            var logKeys = server.Keys(pattern: RedisKeys.ClientLogPattern(clientAppId)).ToArray();
+            var logKeys = server.Keys(pattern: RedisKeys.CustomerLogPattern(clientAppId, tenantId)).ToArray();
             var logs = new List<LogEntry>();
             var usageByModel = new Dictionary<string, long>();
             decimal totalCostToUs = 0m;
@@ -112,8 +113,8 @@ public static class ClientDetailEndpoints
             }
 
             var minuteWindow = DateTimeOffset.UtcNow.ToUnixTimeSeconds() / 60;
-            var tpmValue = await db.StringGetAsync(RedisKeys.RateLimitTpm(clientAppId, minuteWindow));
-            var rpmValue = await db.StringGetAsync(RedisKeys.RateLimitRpm(clientAppId, minuteWindow));
+            var tpmValue = await db.StringGetAsync(RedisKeys.RateLimitTpm(clientAppId, tenantId, minuteWindow));
+            var rpmValue = await db.StringGetAsync(RedisKeys.RateLimitRpm(clientAppId, tenantId, minuteWindow));
 
             var response = new ClientUsageResponse
             {
@@ -131,20 +132,21 @@ public static class ClientDetailEndpoints
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error fetching usage for client {ClientAppId}", clientAppId);
+            logger.LogError(ex, "Error fetching usage for customer {ClientAppId}/{TenantId}", clientAppId, tenantId);
             return Results.Json(new { error = "Failed to fetch client usage" }, statusCode: StatusCodes.Status500InternalServerError);
         }
     }
 
     private static async Task<IResult> GetClientTraces(
         string clientAppId,
+        string tenantId,
         IConnectionMultiplexer redis,
         ILogger<ClientTracesResponse> logger)
     {
         try
         {
             var db = redis.GetDatabase();
-            var entries = await db.ListRangeAsync(RedisKeys.Traces(clientAppId), 0, 99);
+            var entries = await db.ListRangeAsync(RedisKeys.Traces(clientAppId, tenantId), 0, 99);
 
             var traces = new List<TraceRecord>();
             foreach (var entry in entries)
@@ -157,7 +159,7 @@ public static class ClientDetailEndpoints
                 }
                 catch (JsonException ex)
                 {
-                    logger.LogError(ex, "Failed to deserialize trace for client {ClientAppId}", clientAppId);
+                    logger.LogError(ex, "Failed to deserialize trace for customer {ClientAppId}/{TenantId}", clientAppId, tenantId);
                 }
             }
 
@@ -167,7 +169,7 @@ public static class ClientDetailEndpoints
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error fetching traces for client {ClientAppId}", clientAppId);
+            logger.LogError(ex, "Error fetching traces for customer {ClientAppId}/{TenantId}", clientAppId, tenantId);
             return Results.Json(new { error = "Failed to fetch client traces" }, statusCode: StatusCodes.Status500InternalServerError);
         }
     }

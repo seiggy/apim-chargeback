@@ -42,14 +42,14 @@ public sealed class AuditStore : IAuditStore
             await database.CreateContainerIfNotExistsAsync(new ContainerProperties
             {
                 Id = AuditLogsContainer,
-                PartitionKeyPath = "/clientAppId",
+                PartitionKeyPath = "/customerKey",
                 DefaultTimeToLive = DefaultTtlSeconds
             }, cancellationToken: ct);
 
             await database.CreateContainerIfNotExistsAsync(new ContainerProperties
             {
                 Id = BillingSummariesContainer,
-                PartitionKeyPath = "/clientAppId",
+                PartitionKeyPath = "/customerKey",
                 DefaultTimeToLive = DefaultTtlSeconds
             }, cancellationToken: ct);
 
@@ -72,7 +72,7 @@ public sealed class AuditStore : IAuditStore
         {
             tasks.Add(AuditLogs.CreateItemAsync(
                 doc,
-                new PartitionKey(doc.ClientAppId),
+                new PartitionKey(doc.CustomerKey),
                 cancellationToken: ct));
         }
 
@@ -81,14 +81,15 @@ public sealed class AuditStore : IAuditStore
 
     public async Task UpsertBillingSummariesAsync(IReadOnlyList<AuditLogItem> items, CancellationToken ct = default)
     {
-        // Group items by client+deployment+period to minimize upserts
-        var groups = items.GroupBy(i => (i.ClientAppId, i.DeploymentId, Period: $"{i.Timestamp:yyyy-MM}"));
+        // Group items by customer+deployment+period to minimize upserts
+        var groups = items.GroupBy(i => (i.ClientAppId, i.TenantId, i.DeploymentId, Period: $"{i.Timestamp:yyyy-MM}"));
 
         foreach (var group in groups)
         {
-            var (clientAppId, deploymentId, period) = group.Key;
-            var summaryId = $"{clientAppId}:{deploymentId}:{period}";
-            var partitionKey = new PartitionKey(clientAppId);
+            var (clientAppId, tenantId, deploymentId, period) = group.Key;
+            var customerKey = $"{clientAppId}:{tenantId}";
+            var summaryId = $"{clientAppId}:{tenantId}:{deploymentId}:{period}";
+            var partitionKey = new PartitionKey(customerKey);
 
             BillingSummaryDocument summary;
             try
@@ -103,6 +104,7 @@ public sealed class AuditStore : IAuditStore
                 summary = new BillingSummaryDocument
                 {
                     Id = summaryId,
+                    CustomerKey = customerKey,
                     ClientAppId = clientAppId,
                     DisplayName = first.DisplayName,
                     TenantId = first.TenantId,
@@ -152,15 +154,15 @@ public sealed class AuditStore : IAuditStore
     }
 
     public async Task<List<AuditLogDocument>> GetClientAuditLogsAsync(
-        string clientAppId, string billingPeriod, CancellationToken ct = default)
+        string customerKey, string billingPeriod, CancellationToken ct = default)
     {
         await EnsureInitializedAsync(ct);
         var query = new QueryDefinition(
-            "SELECT * FROM c WHERE c.clientAppId = @clientAppId AND c.billingPeriod = @period ORDER BY c.timestamp DESC")
-            .WithParameter("@clientAppId", clientAppId)
+            "SELECT * FROM c WHERE c.customerKey = @customerKey AND c.billingPeriod = @period ORDER BY c.timestamp DESC")
+            .WithParameter("@customerKey", customerKey)
             .WithParameter("@period", billingPeriod);
 
-        var options = new QueryRequestOptions { PartitionKey = new PartitionKey(clientAppId) };
+        var options = new QueryRequestOptions { PartitionKey = new PartitionKey(customerKey) };
         return await QueryAllAsync<AuditLogDocument>(AuditLogs, query, ct, options);
     }
 
@@ -189,16 +191,17 @@ public sealed class AuditStore : IAuditStore
     {
         await EnsureInitializedAsync(ct);
         var query = new QueryDefinition(
-            "SELECT DISTINCT c.clientAppId, c.displayName FROM c WHERE c.billingPeriod = @period")
+            "SELECT DISTINCT c.clientAppId, c.tenantId, c.displayName FROM c WHERE c.billingPeriod = @period")
             .WithParameter("@period", billingPeriod);
 
         var results = await QueryAllAsync<BillingSummaryDocument>(BillingSummaries, query, ct);
 
         return results
-            .GroupBy(r => r.ClientAppId, StringComparer.OrdinalIgnoreCase)
+            .GroupBy(r => $"{r.ClientAppId}:{r.TenantId}", StringComparer.OrdinalIgnoreCase)
             .Select(g => new ExportClient
             {
-                ClientAppId = g.Key,
+                ClientAppId = g.First().ClientAppId,
+                TenantId = g.First().TenantId,
                 DisplayName = g.First().DisplayName
             })
             .OrderBy(c => c.DisplayName)

@@ -3,17 +3,24 @@ using System.Text.Json.Serialization;
 namespace Chargeback.Api.Models;
 
 /// <summary>
-/// Monthly billing summary per client+deployment stored in Cosmos DB.
+/// Monthly billing summary per customer+deployment stored in Cosmos DB.
+/// A "Customer" is the clientAppId:tenantId combination.
 /// Incrementally updated via upsert during batch writes.
-/// Partition key: /clientAppId
+/// Partition key: /customerKey
 /// </summary>
 public sealed class BillingSummaryDocument
 {
     /// <summary>
-    /// Composite key: {clientAppId}:{deploymentId}:{billingPeriod}
+    /// Composite key: {clientAppId}:{tenantId}:{deploymentId}:{billingPeriod}
     /// </summary>
     [JsonPropertyName("id")]
     public string Id { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Synthetic partition key: {clientAppId}:{tenantId}
+    /// </summary>
+    [JsonPropertyName("customerKey")]
+    public string CustomerKey { get; set; } = string.Empty;
 
     [JsonPropertyName("clientAppId")]
     public string ClientAppId { get; set; } = string.Empty;

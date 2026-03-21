@@ -1,12 +1,14 @@
 namespace Chargeback.Api.Models;
 
 /// <summary>
-/// Links a client application to a billing plan.
-/// Stored in Redis with key pattern: client:{clientAppId}
+/// Links a client application + tenant combination to a billing plan.
+/// A "Customer" is uniquely identified by the clientAppId:tenantId pair.
+/// Stored in Redis with key pattern: client:{clientAppId}:{tenantId}
 /// </summary>
 public sealed class ClientPlanAssignment
 {
     public string ClientAppId { get; set; } = string.Empty;
+    public string TenantId { get; set; } = string.Empty;
     public string PlanId { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
     public DateTime CurrentPeriodStart { get; set; } = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1, 0, 0, 0, DateTimeKind.Utc);

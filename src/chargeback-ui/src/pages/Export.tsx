@@ -50,7 +50,7 @@ export function Export() {
           setAuditPeriod(key)
         }
         if (data.clients.length > 0) {
-          setAuditClient(data.clients[0].clientAppId)
+          setAuditClient(`${data.clients[0].clientAppId}|${data.clients[0].tenantId}`)
         }
       })
       .catch(err => {
@@ -100,10 +100,12 @@ export function Export() {
 
   const handleClientAuditExport = async () => {
     if (!selectedAuditPeriod || !auditClient) return
+    const [clientAppId, tenantId] = auditClient.split("|")
+    if (!clientAppId || !tenantId) return
     setDownloading(true)
     setDownloadError(null)
     try {
-      await downloadClientAudit(auditClient, selectedAuditPeriod.year, selectedAuditPeriod.month)
+      await downloadClientAudit(clientAppId, tenantId, selectedAuditPeriod.year, selectedAuditPeriod.month)
     } catch (err: any) {
       setDownloadError(err?.message ?? "Download failed")
     } finally {
@@ -230,8 +232,8 @@ export function Export() {
                     <option value="">No clients available</option>
                   ) : (
                     clients.map(c => (
-                      <option key={c.clientAppId} value={c.clientAppId}>
-                        {c.displayName || c.clientAppId}
+                      <option key={`${c.clientAppId}|${c.tenantId}`} value={`${c.clientAppId}|${c.tenantId}`}>
+                        {c.displayName ? `${c.displayName} (${c.clientAppId} / ${c.tenantId})` : `${c.clientAppId} / ${c.tenantId}`}
                       </option>
                     ))
                   )}

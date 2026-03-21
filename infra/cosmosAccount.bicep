@@ -48,14 +48,16 @@ resource auditLogsContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/
     resource: {
       id: 'audit-logs'
       partitionKey: {
-        paths: ['/clientAppId']
+        paths: ['/customerKey']
         kind: 'Hash'
       }
       indexingPolicy: {
         indexingMode: 'consistent'
         includedPaths: [
           { path: '/billingPeriod/?' }
+          { path: '/customerKey/?' }
           { path: '/clientAppId/?' }
+          { path: '/tenantId/?' }
           { path: '/timestamp/?' }
         ]
         excludedPaths: [
@@ -74,14 +76,16 @@ resource billingSummariesContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDat
     resource: {
       id: 'billing-summaries'
       partitionKey: {
-        paths: ['/clientAppId']
+        paths: ['/customerKey']
         kind: 'Hash'
       }
       indexingPolicy: {
         indexingMode: 'consistent'
         includedPaths: [
           { path: '/billingPeriod/?' }
+          { path: '/customerKey/?' }
           { path: '/clientAppId/?' }
+          { path: '/tenantId/?' }
         ]
         excludedPaths: [
           { path: '/*' }
