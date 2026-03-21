@@ -19,7 +19,6 @@ resource "random_uuid" "role_apim" {}
 resource "azuread_application" "api" {
   display_name     = "Chargeback API"
   sign_in_audience = "AzureADMultipleOrgs"
-  identifier_uris  = ["api://${azuread_application.api.client_id}"]
 
   api {
     oauth2_permission_scope {
@@ -67,6 +66,11 @@ resource "azuread_application" "api" {
       type = "Scope"
     }
   }
+}
+
+resource "azuread_application_identifier_uri" "api" {
+  application_id = azuread_application.api.id
+  identifier_uri = "api://${azuread_application.api.client_id}"
 }
 
 resource "azuread_service_principal" "api" {

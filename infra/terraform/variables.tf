@@ -30,7 +30,7 @@ variable "secondary_tenant_id" {
 variable "apim_sku" {
   description = "APIM SKU name"
   type        = string
-  default     = "Consumption"
+  default     = "Consumption_0"
 }
 
 variable "apim_publisher_email" {
