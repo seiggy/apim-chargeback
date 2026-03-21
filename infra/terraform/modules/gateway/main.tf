@@ -101,7 +101,6 @@ resource "azurerm_role_assignment" "apim_cognitive_services_user" {
 
 # APIM identity → Key Vault Secrets User on Key Vault
 resource "azurerm_role_assignment" "apim_key_vault_secrets_user" {
-  count                = var.key_vault_id != "" ? 1 : 0
   scope                = var.key_vault_id
   role_definition_name = "Key Vault Secrets User"
   principal_id         = azurerm_api_management.this.identity[0].principal_id
@@ -109,7 +108,6 @@ resource "azurerm_role_assignment" "apim_key_vault_secrets_user" {
 
 # APIM identity → Contributor on Container App
 resource "azurerm_role_assignment" "apim_container_app_contributor" {
-  count                = var.container_app_id != "" ? 1 : 0
   scope                = var.container_app_id
   role_definition_name = "Contributor"
   principal_id         = azurerm_api_management.this.identity[0].principal_id
