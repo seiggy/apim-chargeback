@@ -33,17 +33,36 @@ The Aspire dashboard opens automatically at `https://localhost:17224` and provid
 
 ### Azure Deployment
 
+**Option A: Bicep (all-in-one script)**
+
 ```powershell
-# Basic deployment (single-tenant)
+# Deploys infrastructure, builds container, configures everything
 ./scripts/setup-azure.ps1 -Location eastus2
 
-# Multi-tenant demo — register a second tenant for Client 2
+# With multi-tenant demo
 ./scripts/setup-azure.ps1 -Location eastus2 -SecondaryTenantId "<other-tenant-guid>"
 ```
 
-The `-SecondaryTenantId` parameter registers Client 2 (a multi-tenant app) for billing under a second Entra tenant. This demonstrates per-tenant chargeback — the same client app ID appears as two separate billing customers in the dashboard, each with independent quotas and usage tracking.
+**Option B: Terraform (two-stage)**
 
-The setup script also writes `src/chargeback-ui/.env.production.local` with the current tenant/client/audience IDs so dashboard login uses the newly created Entra app registrations.
+```powershell
+# Stage 1: Deploy infrastructure (uses placeholder container image)
+cd infra/terraform
+cp terraform.tfvars.sample terraform.tfvars  # Edit with your values
+terraform init
+terraform apply
+
+# Stage 2: Build and deploy the container to the provisioned ACR
+cd ../..
+./scripts/deploy-container.ps1 -ResourceGroupName rg-chrgbk-eastus2
+
+# For multi-tenant: provision SPs in secondary tenant
+cd infra/terraform
+./register-secondary-tenant.ps1 -SecondaryTenantId "<tenant-id>" `
+    -ApiAppId "<api-app-id>" -Client2AppId "<client2-app-id>"
+```
+
+The two-stage approach is required because the container image depends on the ACR (created by Terraform), and enterprise environments typically block public container registries. The `deploy-container.ps1` script builds the Docker image, pushes to the deployed ACR, and updates the Container App.
 
 See the [Deployment Guide](docs/DOTNET_DEPLOYMENT_GUIDE.md) for full manual steps.
 
