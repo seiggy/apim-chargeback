@@ -130,6 +130,24 @@ public static class PrecheckEndpoints
             }
         }
 
+        // 6. Check deployment access control
+        var accessDeploymentId = context.Request.Query["deploymentId"].ToString();
+        if (!string.IsNullOrEmpty(accessDeploymentId))
+        {
+            // Client override takes precedence over plan
+            var effectiveAllowedDeployments = (assignment.AllowedDeployments is { Count: > 0 })
+                ? assignment.AllowedDeployments
+                : plan.AllowedDeployments;
+
+            if (effectiveAllowedDeployments is { Count: > 0 } &&
+                !effectiveAllowedDeployments.Contains(accessDeploymentId, StringComparer.OrdinalIgnoreCase))
+            {
+                return Results.Json(
+                    new { error = "Deployment not allowed", deploymentId = accessDeploymentId, allowedDeployments = effectiveAllowedDeployments },
+                    statusCode: StatusCodes.Status403Forbidden);
+            }
+        }
+
         return Results.Ok(new { status = "authorized", clientAppId, tenantId, plan = plan.Name, usage = effectiveUsage, limit = plan.MonthlyTokenQuota, currentRpm, rpmLimit = plan.RequestsPerMinuteLimit, currentTpm, tpmLimit = plan.TokensPerMinuteLimit });
     }
 }

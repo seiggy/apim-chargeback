@@ -159,6 +159,7 @@ module containerApp './containerApp.bicep' = {
     location: location
     redisCacheName: redisCacheName
     cosmosEndpoint: cosmosAccount.outputs.cosmosEndpoint
+    aiServiceEndpoint: aiServices.outputs.endpoint
     subscriptionId: subscription().subscriptionId
     azureResourceGroup: resourceGroup().name
     appInsightsConnectionString: appInsights.outputs.appInsightsConnectionString

@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react"
-import { fetchPlans, createPlan, updatePlan, deletePlan } from "../api"
-import type { PlanData, PlanCreateRequest } from "../types"
+import { fetchPlans, createPlan, updatePlan, deletePlan, fetchDeployments } from "../api"
+import type { PlanData, PlanCreateRequest, DeploymentInfo } from "../types"
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
 import { Button } from "../components/ui/button"
 import { Input } from "../components/ui/input"
@@ -19,10 +19,12 @@ const emptyPlanForm: PlanCreateRequest = {
   costPerMillionTokens: 0,
   rollUpAllDeployments: true,
   deploymentQuotas: {},
+  allowedDeployments: [],
 }
 
 export function Plans() {
   const [plans, setPlans] = useState<PlanData[]>([])
+  const [availableDeployments, setAvailableDeployments] = useState<DeploymentInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -39,8 +41,12 @@ export function Plans() {
 
   const loadData = useCallback(async () => {
     try {
-      const plansRes = await fetchPlans()
+      const [plansRes, deploymentsRes] = await Promise.all([
+        fetchPlans(),
+        fetchDeployments().catch(() => ({ deployments: [] })),
+      ])
       setPlans(plansRes.plans ?? [])
+      setAvailableDeployments(deploymentsRes.deployments ?? [])
       setError(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load data")
@@ -71,6 +77,7 @@ export function Plans() {
       costPerMillionTokens: p.costPerMillionTokens,
       rollUpAllDeployments: p.rollUpAllDeployments ?? true,
       deploymentQuotas: p.deploymentQuotas ?? {},
+      allowedDeployments: p.allowedDeployments ?? [],
     })
     setNewDeploymentId("")
     setNewDeploymentLimit("")
@@ -95,6 +102,7 @@ export function Plans() {
       costPerMillionTokens: Number(planForm.costPerMillionTokens) || 0,
       rollUpAllDeployments,
       deploymentQuotas: rollUpAllDeployments ? {} : deploymentQuotas,
+      allowedDeployments: planForm.allowedDeployments ?? [],
     }
   }
 
@@ -178,6 +186,7 @@ export function Plans() {
                   <TableHead>RPM Limit</TableHead>
                   <TableHead>Overbilling</TableHead>
                   <TableHead>Cost/M Tokens</TableHead>
+                  <TableHead>Allowed Deployments</TableHead>
                   <TableHead className="w-[100px]">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -202,6 +211,15 @@ export function Plans() {
                       </Badge>
                     </TableCell>
                     <TableCell className="font-mono">${p.costPerMillionTokens.toFixed(2)}</TableCell>
+                    <TableCell>
+                      {!p.allowedDeployments || p.allowedDeployments.length === 0 ? (
+                        <Badge variant="blue">All</Badge>
+                      ) : (
+                        <span title={p.allowedDeployments.join(", ")}>
+                          <Badge variant="green">{p.allowedDeployments.length} selected</Badge>
+                        </span>
+                      )}
+                    </TableCell>
                     <TableCell>
                       <div className="flex gap-1">
                         <Button variant="ghost" size="icon" onClick={() => openEditPlan(p)}>
@@ -286,7 +304,7 @@ export function Plans() {
           </div>
           {planForm.rollUpAllDeployments === false && (
             <div className="space-y-2 rounded border p-3">
-              <label className="text-sm font-medium">Per-Deployment Quotas</label>
+              <label className="text-sm font-medium block">Per-Deployment Quotas</label>
               {Object.entries(planForm.deploymentQuotas ?? {}).map(([depId, limit]) => (
                 <div key={depId} className="flex items-center gap-2">
                   <span className="text-sm font-mono flex-1">{depId}</span>
@@ -352,6 +370,46 @@ export function Plans() {
               </div>
             </div>
           )}
+          <div className="space-y-2 rounded border p-3">
+            <label className="text-sm font-medium block">Allowed Deployments</label>
+            <p className="text-xs text-muted-foreground">
+              Empty = all deployments allowed. Select specific deployments to restrict access.
+            </p>
+            {availableDeployments.length === 0 ? (
+              <p className="text-xs text-muted-foreground italic">
+                No deployments found — configure AZURE_AI_ENDPOINT to enable deployment discovery.
+              </p>
+            ) : (
+              <div className="space-y-1 max-h-48 overflow-y-auto">
+                {availableDeployments.map((dep) => {
+                  const checked = (planForm.allowedDeployments ?? []).includes(dep.id)
+                  return (
+                    <div key={dep.id} className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        id={`plan-dep-${dep.id}`}
+                        checked={checked}
+                        onChange={(e) => {
+                          setPlanForm((prev) => {
+                            const current = prev.allowedDeployments ?? []
+                            const next = e.target.checked
+                              ? [...current, dep.id]
+                              : current.filter((d) => d !== dep.id)
+                            return { ...prev, allowedDeployments: next }
+                          })
+                        }}
+                        className="h-4 w-4 rounded border-gray-300 accent-[#0078D4]"
+                      />
+                      <label htmlFor={`plan-dep-${dep.id}`} className="text-sm">
+                        <span className="font-mono">{dep.id}</span>
+                        <span className="text-muted-foreground ml-1">({dep.model})</span>
+                      </label>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="outline" onClick={() => setPlanDialogOpen(false)}>Cancel</Button>
             <Button onClick={handleSavePlan} disabled={saving || !planForm.name}>

@@ -544,6 +544,60 @@ public class EndpointTests : IClassFixture<ChargebackApiFactory>
         Assert.Equal(HttpStatusCode.TooManyRequests, response.StatusCode);
     }
 
+    // ── Deployment Access Control ──────────────────────────────────────
+
+    [Fact]
+    public async Task Precheck_EmptyAllowedDeployments_AllowsAny()
+    {
+        SeedPlan("plan-deploy-any", "Any Deploy Plan");
+        SeedClientAssignment("deploy-any-client", "plan-deploy-any", "Deploy Any Client");
+
+        var response = await _client.GetAsync("/api/precheck/deploy-any-client/tenant-1?deploymentId=gpt-4o");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Precheck_PlanAllowedDeployment_Returns200()
+    {
+        SeedPlan("plan-deploy-ok", "Allowed Deploy Plan", allowedDeployments: ["gpt-4o", "gpt-4o-mini"]);
+        SeedClientAssignment("deploy-ok-client", "plan-deploy-ok", "Deploy OK Client");
+
+        var response = await _client.GetAsync("/api/precheck/deploy-ok-client/tenant-1?deploymentId=gpt-4o");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Precheck_PlanBlockedDeployment_Returns403()
+    {
+        SeedPlan("plan-deploy-block", "Blocked Deploy Plan", allowedDeployments: ["gpt-4o-mini"]);
+        SeedClientAssignment("deploy-block-client", "plan-deploy-block", "Deploy Block Client");
+
+        var response = await _client.GetAsync("/api/precheck/deploy-block-client/tenant-1?deploymentId=gpt-4o");
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Precheck_ClientOverrideAllowsDeployment()
+    {
+        SeedPlan("plan-deploy-strict", "Strict Plan", allowedDeployments: ["gpt-4o-mini"]);
+        SeedClientAssignment("deploy-override-client", "plan-deploy-strict", "Override Client",
+            allowedDeployments: ["gpt-4o", "gpt-4o-mini"]);
+
+        var response = await _client.GetAsync("/api/precheck/deploy-override-client/tenant-1?deploymentId=gpt-4o");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Precheck_ClientOverrideBlocksDeployment()
+    {
+        SeedPlan("plan-deploy-open", "Open Plan");
+        SeedClientAssignment("deploy-restrict-client", "plan-deploy-open", "Restrict Client",
+            allowedDeployments: ["gpt-4o-mini"]);
+
+        var response = await _client.GetAsync("/api/precheck/deploy-restrict-client/tenant-1?deploymentId=gpt-4o");
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
     // ── Export Endpoints ──────────────────────────────────────────────────
 
     [Fact]
@@ -815,7 +869,8 @@ public class EndpointTests : IClassFixture<ChargebackApiFactory>
         bool rollUpAllDeployments = true,
         int tokensPerMinuteLimit = 0,
         int requestsPerMinuteLimit = 0,
-        Dictionary<string, long>? deploymentQuotas = null)
+        Dictionary<string, long>? deploymentQuotas = null,
+        List<string>? allowedDeployments = null)
     {
         var plan = new PlanData
         {
@@ -829,6 +884,7 @@ public class EndpointTests : IClassFixture<ChargebackApiFactory>
             CostPerMillionTokens = 5m,
             RollUpAllDeployments = rollUpAllDeployments,
             DeploymentQuotas = deploymentQuotas ?? new Dictionary<string, long>(),
+            AllowedDeployments = allowedDeployments ?? [],
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
@@ -838,7 +894,8 @@ public class EndpointTests : IClassFixture<ChargebackApiFactory>
     private void SeedClientAssignment(string clientAppId, string planId, string displayName,
         long currentPeriodUsage = 0,
         Dictionary<string, long>? deploymentUsage = null,
-        string tenantId = "tenant-1")
+        string tenantId = "tenant-1",
+        List<string>? allowedDeployments = null)
     {
         var assignment = new ClientPlanAssignment
         {
@@ -849,6 +906,7 @@ public class EndpointTests : IClassFixture<ChargebackApiFactory>
             CurrentPeriodStart = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1, 0, 0, 0, DateTimeKind.Utc),
             CurrentPeriodUsage = currentPeriodUsage,
             DeploymentUsage = deploymentUsage ?? new Dictionary<string, long>(),
+            AllowedDeployments = allowedDeployments ?? [],
             LastUpdated = DateTime.UtcNow
         };
         _factory.Redis.SeedString(RedisKeys.Client(clientAppId, tenantId), JsonSerializer.Serialize(assignment, JsonOpts));

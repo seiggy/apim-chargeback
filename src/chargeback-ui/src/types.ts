@@ -80,6 +80,7 @@ export interface PlanData {
   costPerMillionTokens: number;
   rollUpAllDeployments: boolean;
   deploymentQuotas: Record<string, number>;
+  allowedDeployments: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -94,6 +95,7 @@ export interface PlanCreateRequest {
   costPerMillionTokens: number;
   rollUpAllDeployments?: boolean;
   deploymentQuotas?: Record<string, number>;
+  allowedDeployments?: string[];
 }
 
 export interface PlanUpdateRequest {
@@ -106,6 +108,7 @@ export interface PlanUpdateRequest {
   costPerMillionTokens?: number;
   rollUpAllDeployments?: boolean;
   deploymentQuotas?: Record<string, number>;
+  allowedDeployments?: string[];
 }
 
 export interface ClientAssignment {
@@ -117,6 +120,7 @@ export interface ClientAssignment {
   currentPeriodUsage: number;
   overbilledTokens: number;
   deploymentUsage: Record<string, number>;
+  allowedDeployments: string[];
   currentRpm?: number;
   currentTpm?: number;
   lastUpdated: string;
@@ -125,6 +129,7 @@ export interface ClientAssignment {
 export interface ClientAssignRequest {
   planId: string;
   displayName?: string;
+  allowedDeployments?: string[];
 }
 
 export interface PlansResponse {
@@ -199,4 +204,16 @@ export interface ExportPeriodsResponse {
   periods: ExportPeriod[];
   currentPeriod: ExportPeriod;
   clients: ExportClient[];
+}
+
+export interface DeploymentInfo {
+  id: string;
+  model: string;
+  modelVersion: string;
+  skuName: string;
+  skuCapacity: number;
+}
+
+export interface DeploymentsResponse {
+  deployments: DeploymentInfo[];
 }

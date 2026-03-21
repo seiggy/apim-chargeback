@@ -37,6 +37,7 @@ builder.Services.AddSingleton<ChargebackMetrics>();
 builder.Services.AddSingleton<ILogDataService, LogDataService>();
 builder.Services.AddSingleton<IUsagePolicyStore, UsagePolicyStore>();
 builder.Services.AddSingleton<IAuditStore, AuditStore>();
+builder.Services.AddSingleton<IDeploymentDiscoveryService, DeploymentDiscoveryService>();
 
 // Audit log channel + background writer for batched Cosmos DB writes
 builder.Services.AddSingleton(Channel.CreateUnbounded<AuditLogItem>(
@@ -104,6 +105,7 @@ app.MapClientDetailEndpoints();
 app.MapPrecheckEndpoints();
 app.MapPricingEndpoints();
 app.MapUsagePolicyEndpoints();
+app.MapDeploymentEndpoints();
 
 // SPA client-side routing fallback (anonymous — SPA handles its own auth)
 app.MapFallbackToFile("index.html").AllowAnonymous();

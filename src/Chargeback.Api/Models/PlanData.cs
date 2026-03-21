@@ -35,6 +35,10 @@ public sealed class PlanData
     /// Key is deploymentId (e.g. "gpt-4o"), value is monthly token limit.</summary>
     public Dictionary<string, long> DeploymentQuotas { get; set; } = new();
 
+    /// <summary>Allowed deployment IDs for this plan. Empty list = all deployments allowed.
+    /// When non-empty, only listed deployments can be accessed by clients on this plan.</summary>
+    public List<string> AllowedDeployments { get; set; } = [];
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }

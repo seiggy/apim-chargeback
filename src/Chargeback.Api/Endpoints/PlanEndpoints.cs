@@ -144,6 +144,7 @@ public static class PlanEndpoints
                 CostPerMillionTokens = body.CostPerMillionTokens,
                 RollUpAllDeployments = body.RollUpAllDeployments ?? true,
                 DeploymentQuotas = body.DeploymentQuotas ?? new(),
+                AllowedDeployments = body.AllowedDeployments ?? [],
                 CreatedAt = now,
                 UpdatedAt = now
             };
@@ -201,6 +202,7 @@ public static class PlanEndpoints
             if (body.CostPerMillionTokens.HasValue) plan.CostPerMillionTokens = body.CostPerMillionTokens.Value;
             if (body.RollUpAllDeployments.HasValue) plan.RollUpAllDeployments = body.RollUpAllDeployments.Value;
             if (body.DeploymentQuotas is not null) plan.DeploymentQuotas = body.DeploymentQuotas;
+            if (body.AllowedDeployments is not null) plan.AllowedDeployments = body.AllowedDeployments;
             plan.UpdatedAt = DateTime.UtcNow;
 
             var cacheValue = JsonSerializer.Serialize(plan, JsonConfig.Default);
@@ -352,6 +354,7 @@ public static class PlanEndpoints
                 CurrentPeriodStart = BillingPeriodCalculator.GetCurrentPeriodStartUtc(DateTime.UtcNow, usagePolicy.BillingCycleStartDay),
                 CurrentPeriodUsage = currentUsage,
                 OverbilledTokens = 0,
+                AllowedDeployments = body.AllowedDeployments ?? [],
                 LastUpdated = DateTime.UtcNow
             };
 

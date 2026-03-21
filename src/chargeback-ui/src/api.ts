@@ -1,6 +1,6 @@
 import { PublicClientApplication, type SilentRequest } from "@azure/msal-browser";
 import { msalConfig, loginRequest } from "./auth/msalConfig";
-import type { LogsResponse, ChargebackResponse, QuotasResponse, QuotaUpdateRequest, QuotaData, PlansResponse, PlanCreateRequest, PlanUpdateRequest, PlanData, ClientsResponse, ClientAssignRequest, ClientUsageResponse, ClientTracesResponse, UsageSummaryResponse, RequestLogsResponse, ModelPricingResponse, ModelPricingCreateRequest, ModelPricing, ExportPeriodsResponse } from "./types";
+import type { LogsResponse, ChargebackResponse, QuotasResponse, QuotaUpdateRequest, QuotaData, PlansResponse, PlanCreateRequest, PlanUpdateRequest, PlanData, ClientsResponse, ClientAssignRequest, ClientUsageResponse, ClientTracesResponse, UsageSummaryResponse, RequestLogsResponse, ModelPricingResponse, ModelPricingCreateRequest, ModelPricing, ExportPeriodsResponse, DeploymentsResponse } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -177,6 +177,12 @@ export async function deletePricing(modelId: string): Promise<void> {
 
 export function exportCsvUrl(): string {
   return `${API_BASE}/api/export/csv`;
+}
+
+export async function fetchDeployments(): Promise<DeploymentsResponse> {
+  const res = await authFetch(`${API_BASE}/api/deployments`);
+  if (!res.ok) throw new Error(`Failed to fetch deployments: ${res.statusText}`);
+  return res.json();
 }
 
 export async function fetchExportPeriods(): Promise<ExportPeriodsResponse> {

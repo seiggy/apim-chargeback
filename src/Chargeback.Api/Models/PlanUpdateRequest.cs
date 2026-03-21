@@ -11,4 +11,5 @@ public sealed class PlanUpdateRequest
     public decimal? CostPerMillionTokens { get; set; }
     public bool? RollUpAllDeployments { get; set; }
     public Dictionary<string, long>? DeploymentQuotas { get; set; }
+    public List<string>? AllowedDeployments { get; set; }
 }

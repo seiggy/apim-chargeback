@@ -16,6 +16,9 @@ param redisCacheName string
 param subscriptionId string
 param azureResourceGroup string
 
+@description('Azure AI Service endpoint for deployment discovery')
+param aiServiceEndpoint string = ''
+
 @description('Application Insights connection string')
 param appInsightsConnectionString string = ''
 
@@ -146,6 +149,10 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
             {
               name: 'ConnectionStrings__chargeback'
               value: cosmosEndpoint
+            }
+            {
+              name: 'AZURE_AI_ENDPOINT'
+              value: aiServiceEndpoint
             }
           ]
         }

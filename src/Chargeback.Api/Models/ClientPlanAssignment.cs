@@ -18,6 +18,10 @@ public sealed class ClientPlanAssignment
     /// <summary>Token usage broken down by deployment ID for the current period.</summary>
     public Dictionary<string, long> DeploymentUsage { get; set; } = new();
 
+    /// <summary>Allowed deployment IDs for this customer. Empty list = inherit from plan.
+    /// When non-empty, overrides the plan's AllowedDeployments list.</summary>
+    public List<string> AllowedDeployments { get; set; } = [];
+
     /// <summary>Current requests per minute (populated dynamically, not persisted).</summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
     public long CurrentRpm { get; set; }

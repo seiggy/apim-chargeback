@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react"
-import { fetchPlans, fetchClients, assignClient, removeClient } from "../api"
-import type { PlanData, ClientAssignment } from "../types"
+import { fetchPlans, fetchClients, assignClient, removeClient, fetchDeployments } from "../api"
+import type { PlanData, ClientAssignment, DeploymentInfo } from "../types"
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
 import { Button } from "../components/ui/button"
 import { Input } from "../components/ui/input"
@@ -13,6 +13,7 @@ import { Pencil, Trash2, Plus, Users } from "lucide-react"
 export function Clients({ onSelectClient }: { onSelectClient?: (clientAppId: string, tenantId: string) => void }) {
   const [plans, setPlans] = useState<PlanData[]>([])
   const [clients, setClients] = useState<ClientAssignment[]>([])
+  const [availableDeployments, setAvailableDeployments] = useState<DeploymentInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -25,12 +26,18 @@ export function Clients({ onSelectClient }: { onSelectClient?: (clientAppId: str
   const [clientTenantIdInput, setClientTenantIdInput] = useState("")
   const [clientPlanId, setClientPlanId] = useState("")
   const [clientDisplayName, setClientDisplayName] = useState("")
+  const [clientAllowedDeployments, setClientAllowedDeployments] = useState<string[]>([])
 
   const loadData = useCallback(async () => {
     try {
-      const [plansRes, clientsRes] = await Promise.all([fetchPlans(), fetchClients()])
+      const [plansRes, clientsRes, deploymentsRes] = await Promise.all([
+        fetchPlans(),
+        fetchClients(),
+        fetchDeployments().catch(() => ({ deployments: [] })),
+      ])
       setPlans(plansRes.plans ?? [])
       setClients(clientsRes.clients ?? [])
+      setAvailableDeployments(deploymentsRes.deployments ?? [])
       setError(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load data")
@@ -47,6 +54,7 @@ export function Clients({ onSelectClient }: { onSelectClient?: (clientAppId: str
     setClientTenantIdInput("")
     setClientPlanId(plans.length > 0 ? plans[0].id : "")
     setClientDisplayName("")
+    setClientAllowedDeployments([])
     setClientDialogOpen(true)
   }
 
@@ -56,6 +64,7 @@ export function Clients({ onSelectClient }: { onSelectClient?: (clientAppId: str
     setClientTenantIdInput(c.tenantId)
     setClientPlanId(c.planId)
     setClientDisplayName(c.displayName)
+    setClientAllowedDeployments(c.allowedDeployments ?? [])
     setClientDialogOpen(true)
   }
 
@@ -67,6 +76,7 @@ export function Clients({ onSelectClient }: { onSelectClient?: (clientAppId: str
       await assignClient(appId, tenant, {
         planId: clientPlanId,
         displayName: clientDisplayName || undefined,
+        allowedDeployments: clientAllowedDeployments.length > 0 ? clientAllowedDeployments : undefined,
       })
       setClientDialogOpen(false)
       await loadData()
@@ -134,6 +144,7 @@ export function Clients({ onSelectClient }: { onSelectClient?: (clientAppId: str
                   <TableHead>Plan</TableHead>
                   <TableHead>Usage</TableHead>
                   <TableHead>Deployment Usage</TableHead>
+                  <TableHead>Allowed Deployments</TableHead>
                   <TableHead>Overbilled Tokens</TableHead>
                   <TableHead className="w-[100px]">Actions</TableHead>
                 </TableRow>
@@ -176,6 +187,15 @@ export function Clients({ onSelectClient }: { onSelectClient?: (clientAppId: str
                           </div>
                         ) : (
                           <span className="text-muted-foreground text-xs">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {!c.allowedDeployments || c.allowedDeployments.length === 0 ? (
+                          <Badge variant="blue">Plan Default</Badge>
+                        ) : (
+                          <span title={c.allowedDeployments.join(", ")}>
+                            <Badge variant="green">{c.allowedDeployments.length} selected</Badge>
+                          </span>
                         )}
                       </TableCell>
                       <TableCell>
@@ -244,6 +264,44 @@ export function Clients({ onSelectClient }: { onSelectClient?: (clientAppId: str
           <div className="space-y-2">
             <label className="text-sm font-medium">Display Name</label>
             <Input value={clientDisplayName} onChange={(e) => setClientDisplayName(e.target.value)} placeholder="Optional display name" />
+          </div>
+          <div className="space-y-2 rounded border p-3">
+            <label className="text-sm font-medium block">Deployment Access Override</label>
+            <p className="text-xs text-muted-foreground">
+              Empty = inherit from plan. Select specific deployments to override.
+            </p>
+            {availableDeployments.length === 0 ? (
+              <p className="text-xs text-muted-foreground italic">
+                No deployments found — configure AZURE_AI_ENDPOINT to enable deployment discovery.
+              </p>
+            ) : (
+              <div className="space-y-1 max-h-48 overflow-y-auto">
+                {availableDeployments.map((dep) => {
+                  const checked = clientAllowedDeployments.includes(dep.id)
+                  return (
+                    <div key={dep.id} className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        id={`client-dep-${dep.id}`}
+                        checked={checked}
+                        onChange={(e) => {
+                          setClientAllowedDeployments((prev) =>
+                            e.target.checked
+                              ? [...prev, dep.id]
+                              : prev.filter((d) => d !== dep.id)
+                          )
+                        }}
+                        className="h-4 w-4 rounded border-gray-300 accent-[#0078D4]"
+                      />
+                      <label htmlFor={`client-dep-${dep.id}`} className="text-sm">
+                        <span className="font-mono">{dep.id}</span>
+                        <span className="text-muted-foreground ml-1">({dep.model})</span>
+                      </label>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="outline" onClick={() => setClientDialogOpen(false)}>Cancel</Button>
