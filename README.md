@@ -4,6 +4,7 @@
 [![Azure](https://img.shields.io/badge/Azure-0078D4?logo=microsoft-azure&logoColor=white)](https://azure.microsoft.com)
 [![OpenAI](https://img.shields.io/badge/OpenAI-412991?logo=openai&logoColor=white)](https://openai.com)
 [![Bicep](https://img.shields.io/badge/Bicep-0078D4?logo=microsoft-azure&logoColor=white)](https://docs.microsoft.com/azure/azure-resource-manager/bicep/)
+[![Terraform](https://img.shields.io/badge/Terraform-7B42BC?logo=terraform&logoColor=white)](https://www.terraform.io)
 [![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet&logoColor=white)](https://dotnet.microsoft.com)
 [![Aspire](https://img.shields.io/badge/.NET_Aspire-512BD4?logo=dotnet&logoColor=white)](https://learn.microsoft.com/dotnet/aspire/)
 [![React](https://img.shields.io/badge/React-61DAFB?logo=react&logoColor=black)](https://react.dev)
@@ -14,9 +15,9 @@ Enterprise-ready solution for Azure OpenAI usage tracking and chargeback through
 
 **🚀 Quick Deploy**: `git clone → ./scripts/setup-azure.ps1 → done`
 
-**💰 What you get**: Real-time usage tracking, per-customer billing plans with quotas and rate limits (where a "customer" is any client app + tenant combination), overbilling support, per-deployment quotas, WebSocket live dashboard, durable Cosmos DB audit trail, monthly billing exports, DLP policy validation via Purview
+**💰 What you get**: Real-time usage tracking, per-customer billing plans with quotas and rate limits (where a "customer" is any client app + tenant combination), overbilling support, per-deployment quotas, deployment access control (allowlist per plan/client), WebSocket live dashboard, durable Cosmos DB audit trail, monthly billing exports, DLP policy validation via Purview
 
-**🏗️ Tech Stack**: .NET 10, Azure Container Apps, ASP.NET Minimal APIs, .NET Aspire, React/TypeScript, Redis, Cosmos DB, OpenTelemetry + Azure Monitor, Microsoft Purview (Agent 365)
+**🏗️ Tech Stack**: .NET 10, Azure Container Apps, ASP.NET Minimal APIs, .NET Aspire, React/TypeScript, Azure Managed Redis, Cosmos DB, Bicep/Terraform, OpenTelemetry + Azure Monitor, Microsoft Purview (Agent 365)
 
 ## Quick Start
 
@@ -26,7 +27,7 @@ Enterprise-ready solution for Azure OpenAI usage tracking and chargeback through
 # Clone and run (requires .NET 10 SDK + Docker for Redis)
 git clone https://github.com/your-org/apim-openai-chargeback-environment.git
 cd apim-openai-chargeback-environment/src
-dotnet run --project src/Chargeback.AppHost
+dotnet run --project Chargeback.AppHost
 ```
 
 The Aspire dashboard opens automatically at `https://localhost:17224` and provides resource status, logs, traces, and metrics for all services.
@@ -111,9 +112,10 @@ graph LR
     A[Client Apps] -->|Bearer Token| B[APIM Gateway]
     B -->|Outbound Policy| C[Chargeback.Api]
     B --> D[Azure OpenAI]
-    C --> E[Redis Cache]
+    C --> E[Azure Managed Redis]
     C --> F[Azure Monitor]
     C --> G[Microsoft Purview]
+    C --> I[Cosmos DB]
     E --> H[React Dashboard]
     C -->|WebSocket| H
 ```
@@ -124,7 +126,8 @@ A single **Azure Container App** (`Chargeback.Api`) hosts all chargeback functio
 |----------|--------|-------------|
 | `/` | GET | React SPA dashboard |
 | `/api/log` | POST | APIM outbound policy calls this to record usage |
-| `/api/precheck/{clientAppId}/{tenantId}` | GET | APIM inbound policy calls this to check quota/rate limits |
+| `/api/precheck/{clientAppId}/{tenantId}` | GET | APIM inbound policy calls this to check quota, rate limits, and deployment access |
+| `/api/deployments` | GET | List available Azure OpenAI deployments from the Foundry resource |
 | `/api/usage` | GET | Aggregated usage summaries |
 | `/api/logs` | GET | Individual request log entries |
 | `/chargeback` | GET | Total chargeback amount with itemized data |
@@ -143,7 +146,8 @@ A single **Azure Container App** (`Chargeback.Api`) hosts all chargeback functio
 **Core Components**:
 - 🔐 **API Management** — Gateway with Entra JWT validation, inbound pre-check, outbound log forwarding
 - ⚡ **Chargeback.Api** — ASP.NET Minimal API for log ingestion, billing, cost calculation, and dashboard
-- 💾 **Redis Cache** — Hot cache for real-time log data, plan/client assignments, and rate limiting
+- 💾 **Azure Managed Redis** — Hot cache for real-time log data, plan/client assignments, and rate limiting
+- 🔑 **Deployment access control** — Per-plan and per-client deployment allowlists
 - 🗄️ **Cosmos DB** — Durable audit trail for financial record-keeping (36-month retention), batched writes via `Channel<T>` + `BackgroundService`
 - 📊 **React/TypeScript SPA** — Multi-page dashboard with billing management and real-time streaming
 - 🔭 **OpenTelemetry + Azure Monitor** — Distributed tracing, custom metrics, structured logging
@@ -154,9 +158,9 @@ A single **Azure Container App** (`Chargeback.Api`) hosts all chargeback functio
 
 The React SPA provides five pages:
 
-- **Dashboard** — KPI cards (total cost, tokens, requests), client overview with quota meters, usage charts over time, and a live request log
-- **Clients** — Client assignment management with plan badges and usage progress bars
-- **Plans** — Billing plan CRUD with monthly quota limits, rate limits (requests/min), overbilling toggle, and per-deployment quotas
+- **Dashboard** — KPI cards (total cost, tokens, requests), top 4 clients by utilization, usage charts over time, paginated usage table, and a live request log
+- **Clients** — Client assignment management with tenant ID column, plan badges, usage progress bars, and deployment access override
+- **Plans** — Billing plan CRUD with monthly quota limits, rate limits (requests/min), overbilling toggle, per-deployment quotas, and deployment access control (allowed deployments picker)
 - **Pricing** — Model cost rate management (cost per 1K input/output tokens per model)
 - **Export** — Two report types: **Billing Summary** (rolled-up per client for a month) and **Client Audit Trail** (every request for a specific client). Period/client selector with current-month warning. Requires `Chargeback.Export` app role.
 
@@ -260,18 +264,20 @@ The APIM outbound policy automatically forwards the response payload and JWT cla
 - 🛡️ **DLP Compliance**: Microsoft Purview integration for policy validation and audit
 - 🏗️ **Aspire Orchestration**: Single `dotnet run` for local development with all dependencies
 - 🔒 **Zero Subscription Keys**: Entra ID JWT bearer auth end-to-end
-- 🗄️ **Durable Audit Trail**: Cosmos DB stores every request for 36 months with batched writes via `Channel<T>` + `BackgroundService`
+- 🔑 **Deployment Access Control**: Allowlist-based per-plan and per-client deployment restrictions
+- 🗄️ **Durable Audit Trail**: Cosmos DB stores every request for 36 months with partition key `/customerKey` and batched writes via `Channel<T>` + `BackgroundService`
 - 📋 **Financial Exports**: Monthly billing summaries and per-client audit trail CSV exports with role-based access control
+- 🏗️ **Dual IaC Support**: Both Bicep and Terraform configurations included
 
 ## Observability
 
 Telemetry is configured via `Chargeback.ServiceDefaults` using the [Azure Monitor OpenTelemetry distro](https://learn.microsoft.com/azure/azure-monitor/app/opentelemetry-enable):
 
-| Custom Metric | Description |
-|---------------|-------------|
-| `chargeback.tokens_processed` | Total tokens processed across all requests |
-| `chargeback.cost_total` | Cumulative cost in USD |
-| `chargeback.requests_processed` | Total chargeback requests handled |
+| Custom Metric | Description | Dimensions |
+|---------------|-------------|------------|
+| `chargeback.tokens_processed` | Total tokens processed across all requests | `tenant_id`, `client_app_id`, `model`, `deployment_id` |
+| `chargeback.cost_total` | Cumulative cost in USD | `tenant_id`, `client_app_id`, `model`, `deployment_id` |
+| `chargeback.requests_processed` | Total chargeback requests handled | `tenant_id`, `client_app_id`, `model`, `deployment_id` |
 
 Distributed traces, structured logs, and metrics flow to Azure Monitor / Application Insights. The Aspire dashboard provides a local development view of all telemetry.
 The infrastructure deployment also creates an Azure Monitor workbook dashboard (`logAnalyticsWorkbook.bicep`) with 30-day token/cost trend, top clients, status distribution, and quota/rate-limit event views from Log Analytics.
@@ -317,15 +323,22 @@ infra/
 │   ├── redisCache.bicep            # Azure Managed Redis
 │   ├── apimInstance.bicep          # APIM instance
 │   └── ...                         # Additional Bicep modules
+├── terraform/                      # Terraform IaC modules
+│   ├── main.tf                     # Root orchestration
+│   ├── providers.tf                # azurerm, azuread, azapi providers
+│   ├── variables.tf                # Input variables
+│   ├── modules/                    # 6 modules: monitoring, data, ai_services, identity, compute, gateway
+│   └── register-secondary-tenant.ps1
 scripts/
 ├── setup-azure.ps1                 # Automated Azure deployment script
+├── deploy-container.ps1            # Build and deploy container to ACR
 └── deploy-functionapp-test.ps1     # Bicep testing patterns (reference)
 docs/                               # Documentation
 ```
 
-> **📝 Note**: The original Python implementation is preserved in `src/`, `app/`, and `librechat/` for reference. The .NET 10 implementation in `src/` is the actively maintained version.
-
 ## Infrastructure
+
+### Bicep
 
 Infrastructure is defined in Bicep modules under `infra/bicep/`:
 
@@ -334,7 +347,7 @@ Infrastructure is defined in Bicep modules under `infra/bicep/`:
 | `containerApp.bicep` | Azure Container App for Chargeback.Api |
 | `appInsights.bicep` | Application Insights + Log Analytics workspace |
 | `logAnalyticsWorkbook.bicep` | Azure Monitor workbook dashboard (Log Analytics KQL) |
-| `redisCache.bicep` | Azure Managed Redis |
+| `redisCache.bicep` | Azure Managed Redis (Balanced_B0) |
 | `apimInstance.bicep` | API Management instance |
 | `keyVault.bicep` | Azure Key Vault for secrets |
 | `main.bicep` | Orchestrates all modules |
@@ -348,6 +361,21 @@ az deployment group create \
   --parameters @parameter.json
 ```
 
+### Terraform
+
+Terraform modules are under `infra/terraform/` with six modules: `monitoring`, `data`, `ai_services`, `identity`, `compute`, and `gateway`.
+
+```powershell
+cd infra/terraform
+cp terraform.tfvars.sample terraform.tfvars  # Edit with your values
+terraform init
+terraform apply
+
+# Then build and deploy the container
+cd ../..
+./scripts/deploy-container.ps1 -ResourceGroupName rg-chrgbk-eastus2
+```
+
 ## Prerequisites
 
 - ✅ [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
@@ -355,6 +383,7 @@ az deployment group create \
 - ✅ Azure subscription with appropriate permissions
 - ✅ Azure CLI v2.50+
 - ✅ Docker Desktop (for Aspire local orchestration — Redis runs in a container)
+- ✅ [Terraform >= 1.9](https://www.terraform.io/downloads) (for Terraform deployment path)
 
 **For Purview integration**: Microsoft 365 E5 license + Entra App Registration with Graph permissions
 
@@ -408,7 +437,7 @@ When running via Aspire, connection strings and service discovery are configured
 ✅ Limited only by the Azure Container App request size limit (default 100 MB).
 
 **❓ How long is data retained?**
-✅ Redis cache TTL is 24 hours. Azure Monitor retains telemetry per your workspace retention settings.
+✅ Azure Managed Redis TTL is configurable (default 30 days). Cosmos DB retains audit records for 36 months. Azure Monitor retains telemetry per your workspace retention settings.
 
 **❓ Multi-region support?**
 ✅ Yes. Azure Container Apps and APIM both support multi-region deployment via the Bicep modules.
@@ -419,8 +448,11 @@ When running via Aspire, connection strings and service discovery are configured
 **❓ Do I need a Purview/E5 license?**
 ✅ Only if you enable the Purview DLP integration. The core chargeback functionality works without it.
 
-**❓ Can I still use the Python implementation?**
-✅ The original Python code is preserved in `src/` and `app/` for reference only and is not actively maintained. The .NET 10 implementation in `src/` is the actively maintained version.
+**❓ How does deployment access control work?**
+✅ Plans and individual clients can have an allowlist of permitted Azure OpenAI deployments. The precheck endpoint validates that the requested deployment is allowed before forwarding the request. Client-level overrides take precedence over plan-level settings.
+
+**❓ Should I use Terraform or Bicep?**
+✅ Both paths deploy the same infrastructure. Bicep is simpler with a single `setup-azure.ps1` script. Terraform offers modular state management and is better suited for teams already using Terraform across their stack. The Terraform path requires a two-stage deploy (infra first, then container).
 
 **📚 More questions**: See the [Deployment Guide](docs/DOTNET_DEPLOYMENT_GUIDE.md) for full environment variable reference and KQL queries.
 
@@ -445,6 +477,6 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 ---
 
-**🎯 Ready to get started?** `cd dotnet && dotnet run --project src/Chargeback.AppHost`
+**🎯 Ready to get started?** `dotnet run --project src/Chargeback.AppHost`
 
 **💡 Need help?** Check our [FAQ](#faq) or the [Deployment Guide](docs/DOTNET_DEPLOYMENT_GUIDE.md).
