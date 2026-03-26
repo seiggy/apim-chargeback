@@ -187,6 +187,9 @@ public sealed class FakeRedis
 
     private void SetupServerOps()
     {
+        Server.IsConnected.Returns(true);
+        Server.IsReplica.Returns(false);
+
         Server.Keys(
                 Arg.Any<int>(), Arg.Any<RedisValue>(), Arg.Any<int>(),
                 Arg.Any<long>(), Arg.Any<int>(), Arg.Any<CommandFlags>())

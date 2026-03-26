@@ -5,9 +5,6 @@
     "apimInstanceName": {
       "value": "apim-<your-suffix>"
     },
-    "apiSpecFileUri": {
-      "value": "https://raw.githubusercontent.com/andyogah/azure-rest-api-specs/main/specification/cognitiveservices/data-plane/AzureOpenAI/inference/stable/2024-02-01/inference.json"
-    },
     "keyVaultName": {
       "value": "kv-<your-suffix>"
     },

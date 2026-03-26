@@ -8,10 +8,8 @@ resource apimInstance 'Microsoft.ApiManagement/service@2021-08-01' = {
   name: apimInstanceName
   location: location
   sku: {
-    // name: 'Consumption' // Developer, Consumption, Basic, Standard, Premium, Isolated
-    // capacity: 0 // Capacity is not applicable for the Consumption tier
-    name: 'Developer' // Developer, Consumption, Basic, Standard, Premium, Isolated
-    capacity: 1 // Capacity is not applicable for the Consumption tier
+    name: 'StandardV2'
+    capacity: 1
   }
   properties: {
     publisherEmail: 'admin@contoso.com'

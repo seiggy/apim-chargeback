@@ -29,6 +29,17 @@ builder.AddAzureCosmosClient("chargeback", configureClientOptions: options =>
     {
         PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase
     };
+},
+configureSettings: settings =>
+{
+    settings.Credential = new DefaultAzureCredential(new DefaultAzureCredentialOptions
+    {
+        ExcludeVisualStudioCredential = true,
+        ExcludeVisualStudioCodeCredential = true,
+        ExcludeAzureCliCredential = true,
+        ExcludeAzurePowerShellCredential = true,
+        ExcludeAzureDeveloperCliCredential = true,
+    });
 });
 
 // Register application services

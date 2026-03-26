@@ -22,6 +22,11 @@ output "api_app_id" {
   value       = module.identity.api_app_id
 }
 
+output "gateway_app_id" {
+  description = "Application (client) ID of the APIM Gateway app registration."
+  value       = module.identity.gateway_app_id
+}
+
 output "client1_app_id" {
   description = "Application (client) ID of the Chargeback Sample Client."
   value       = module.identity.client1_app_id
@@ -47,6 +52,11 @@ output "client2_secret" {
 output "tenant_id" {
   description = "Azure AD tenant ID."
   value       = module.identity.tenant_id
+}
+
+output "secondary_tenant_id" {
+  description = "Secondary tenant ID for multi-tenant demo."
+  value       = var.secondary_tenant_id
 }
 
 output "redis_hostname" {

@@ -95,6 +95,7 @@ export function Plans() {
 
     return {
       ...planForm,
+      name: planForm.name.trim(),
       monthlyRate: Number(planForm.monthlyRate) || 0,
       monthlyTokenQuota: rollUpAllDeployments ? (Number(planForm.monthlyTokenQuota) || 0) : 0,
       tokensPerMinuteLimit: Number(planForm.tokensPerMinuteLimit) || 0,
@@ -104,6 +105,16 @@ export function Plans() {
       deploymentQuotas: rollUpAllDeployments ? {} : deploymentQuotas,
       allowedDeployments: planForm.allowedDeployments ?? [],
     }
+  }
+
+  const isPlanFormValid = (): boolean => {
+    if (!planForm.name.trim()) return false
+    if (Number(planForm.monthlyRate) < 0) return false
+    if (Number(planForm.tokensPerMinuteLimit) < 0) return false
+    if (Number(planForm.requestsPerMinuteLimit) < 0) return false
+    if (Number(planForm.costPerMillionTokens) < 0) return false
+    if (planForm.rollUpAllDeployments !== false && Number(planForm.monthlyTokenQuota) < 0) return false
+    return true
   }
 
   const handleSavePlan = async () => {
@@ -248,16 +259,19 @@ export function Plans() {
           <div className="space-y-2">
             <label className="text-sm font-medium">Name</label>
             <Input value={planForm.name} onChange={(e) => updateField("name", e.target.value)} placeholder="Plan name" />
+            {planForm.name.length > 0 && !planForm.name.trim() && (
+              <p className="text-xs text-destructive">Plan name cannot be only whitespace.</p>
+            )}
           </div>
           <div className={`grid gap-4 ${planForm.rollUpAllDeployments !== false ? "grid-cols-2" : "grid-cols-1"}`}>
             <div className="space-y-2">
               <label className="text-sm font-medium">Monthly Rate ($)</label>
-              <Input type="number" step="0.01" value={planForm.monthlyRate} onChange={(e) => updateField("monthlyRate", e.target.value)} />
+              <Input type="number" step="0.01" min="0" value={planForm.monthlyRate} onChange={(e) => updateField("monthlyRate", e.target.value)} />
             </div>
             {planForm.rollUpAllDeployments !== false && (
               <div className="space-y-2">
                 <label className="text-sm font-medium">Monthly Token Quota</label>
-                <Input type="number" value={planForm.monthlyTokenQuota} onChange={(e) => updateField("monthlyTokenQuota", e.target.value)} />
+                <Input type="number" min="0" value={planForm.monthlyTokenQuota} onChange={(e) => updateField("monthlyTokenQuota", e.target.value)} />
               </div>
             )}
           </div>
@@ -269,16 +283,16 @@ export function Plans() {
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <label className="text-sm font-medium">Tokens/Min Limit</label>
-              <Input type="number" value={planForm.tokensPerMinuteLimit} onChange={(e) => updateField("tokensPerMinuteLimit", e.target.value)} />
+              <Input type="number" min="0" value={planForm.tokensPerMinuteLimit} onChange={(e) => updateField("tokensPerMinuteLimit", e.target.value)} />
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium">Requests/Min Limit</label>
-              <Input type="number" value={planForm.requestsPerMinuteLimit} onChange={(e) => updateField("requestsPerMinuteLimit", e.target.value)} />
+              <Input type="number" min="0" value={planForm.requestsPerMinuteLimit} onChange={(e) => updateField("requestsPerMinuteLimit", e.target.value)} />
             </div>
           </div>
           <div className="space-y-2">
             <label className="text-sm font-medium">Cost per Million Tokens ($)</label>
-            <Input type="number" step="0.01" value={planForm.costPerMillionTokens} onChange={(e) => updateField("costPerMillionTokens", e.target.value)} />
+            <Input type="number" step="0.01" min="0" value={planForm.costPerMillionTokens} onChange={(e) => updateField("costPerMillionTokens", e.target.value)} />
           </div>
           <div className="flex items-center gap-2">
             <input
@@ -337,7 +351,7 @@ export function Plans() {
               ))}
               <div className="flex items-center gap-2">
                 <Input
-                  placeholder="Deployment ID (e.g. gpt-4o)"
+                  placeholder="Deployment ID (e.g. gpt-4.1)"
                   value={newDeploymentId}
                   onChange={(e) => setNewDeploymentId(e.target.value)}
                   className="flex-1"
@@ -412,7 +426,7 @@ export function Plans() {
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="outline" onClick={() => setPlanDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleSavePlan} disabled={saving || !planForm.name}>
+            <Button onClick={handleSavePlan} disabled={saving || !isPlanFormValid()}>
               {saving ? "Saving…" : editingPlanId ? "Update" : "Create"}
             </Button>
           </div>

@@ -1,8 +1,6 @@
 param apimInstanceName string
 param oaiApiName string
-param apiSpecFileUri string
 param openAiServiceUrl string
-//param policyContent string
 
 
 resource apimInstance 'Microsoft.ApiManagement/service@2021-08-01' existing = {
@@ -16,7 +14,7 @@ resource openAiBackend 'Microsoft.ApiManagement/service/backends@2021-08-01' = {
     url: openAiServiceUrl
     protocol: 'http'
     title: 'OpenAI Backend'
-    description: 'Backend for OpenAI APIs (Language, DALL-E, Whisper)'
+    description: 'Backend for Azure OpenAI APIs'
   }
 }
 
@@ -24,37 +22,38 @@ resource apimOaiApi 'Microsoft.ApiManagement/service/apis@2021-08-01' = {
   parent: apimInstance
   name: oaiApiName
   properties: {
-    format: 'openapi-link'
-    value: apiSpecFileUri
-    path: 'openapi' // this matches the route in function.json
+    displayName: 'Azure OpenAI Service API'
+    path: 'openai'
+    serviceUrl: openAiServiceUrl
     protocols: [
-      'http','https'
+      'https'
     ]
+    subscriptionRequired: false
   }
 }
+
+// Per-method catch-all operations — StandardV2 doesn't support wildcard (*) method.
+var passthroughMethods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']
+
+@batchSize(1)
+resource apimOaiApiPassthrough 'Microsoft.ApiManagement/service/apis/operations@2021-08-01' = [for method in passthroughMethods: {
+  parent: apimOaiApi
+  name: 'passthrough-${toLower(method)}'
+  properties: {
+    displayName: 'Passthrough ${method}'
+    method: method
+    urlTemplate: '/*'
+  }
+}]
 
 resource apimOaiApiPolicy 'Microsoft.ApiManagement/service/apis/policies@2021-08-01' = {
   parent: apimOaiApi
   name: 'policy'
+  dependsOn: [
+    openAiBackend
+  ]
   properties: {
     format: 'rawxml'
-    //value: loadTextContent('../policies/example-policy.xml') // Load the policy content directly
-    value: '''
-    <policies>
-      <inbound>
-        <base />
-        <!-- Set the backend service to the Azure OpenAI endpoint -->
-        <set-backend-service id="apim-generated-policy" backend-id="openAiBackend" />
-        <!-- Use managed identity to authenticate against the Azure Cognitive Services -->
-        <authentication-managed-identity resource="https://cognitiveservices.azure.com/" />
-      </inbound>
-      <backend>
-        <base />
-      </backend>
-      <outbound>
-        <base />
-      </outbound>
-    </policies>
-    '''
+    value: loadTextContent('../../policies/entra-jwt-policy.xml')
   }
 }

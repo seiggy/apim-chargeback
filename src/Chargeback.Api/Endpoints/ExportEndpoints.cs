@@ -17,6 +17,7 @@ public static class ExportEndpoints
         routes.MapGet("/api/export/available-periods", GetAvailablePeriods)
             .WithName("GetAvailablePeriods")
             .WithDescription("Get available billing periods and clients for export")
+            .RequireAuthorization()
             .Produces<ExportPeriodsResponse>();
 
         // CSV downloads require the Chargeback.Export role

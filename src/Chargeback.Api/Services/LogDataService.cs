@@ -75,8 +75,7 @@ public sealed class LogDataService : ILogDataService
     public async Task<List<LogEntry>> GetAllLogsAsync(ILogger logger)
     {
         var db = _redis.GetDatabase();
-        var server = _redis.GetServers().First();
-        var keys = server.Keys(pattern: RedisKeys.LogEntryPrefix).ToArray();
+        var keys = _redis.KeysFromAllServers(RedisKeys.LogEntryPrefix);
 
         logger.LogInformation("Fetched {KeyCount} log keys from Redis", keys.Length);
 
@@ -128,11 +127,10 @@ public sealed class LogDataService : ILogDataService
     public async Task<List<RequestLogEntry>> GetRequestLogsAsync(ILogger logger)
     {
         var db = _redis.GetDatabase();
-        var server = _redis.GetServers().First();
 
         // Build client displayName lookup from client:* keys
         var clientDisplayNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var clientKeys = server.Keys(pattern: RedisKeys.ClientPrefix).ToArray();
+        var clientKeys = _redis.KeysFromAllServers(RedisKeys.ClientPrefix);
         foreach (var ck in clientKeys)
         {
             var val = await db.StringGetAsync(ck);
@@ -150,7 +148,7 @@ public sealed class LogDataService : ILogDataService
         }
 
         // Collect trace records from ALL traces:* Redis lists
-        var traceKeys = server.Keys(pattern: RedisKeys.TracesPrefix).ToArray();
+        var traceKeys = _redis.KeysFromAllServers(RedisKeys.TracesPrefix);
         var entries = new List<RequestLogEntry>();
 
         foreach (var traceKey in traceKeys)

@@ -8,10 +8,10 @@ public class ChargebackCalculatorTests
     private readonly ChargebackCalculator _calculator = new();
 
     [Theory]
-    [InlineData("gpt-4o", 1000, 500, 0.06)]   // 1K * 0.03 + 0.5K * 0.06
-    [InlineData("gpt-4", 2000, 1000, 0.09)]    // 2K * 0.02 + 1K * 0.05 (0.04 + 0.05)
-    [InlineData("gpt-35-turbo", 10000, 5000, 0.025)] // 10K * 0.0015 + 5K * 0.002
-    [InlineData("gpt-4o-mini", 1000, 1000, 0.02)]    // 1K * 0.005 + 1K * 0.015
+    [InlineData("gpt-4.1", 1000, 500, 0.06)]       // 1K * 0.02 + 0.5K * 0.08
+    [InlineData("gpt-4", 2000, 1000, 0.09)]         // 2K * 0.02 + 1K * 0.05
+    [InlineData("gpt-4.1-mini", 10000, 5000, 0.12)] // 10K * 0.004 + 5K * 0.016
+    [InlineData("gpt-4o-mini", 1000, 1000, 0.02)]   // 1K * 0.005 + 1K * 0.015
     public void CalculateCost_KnownModel_ReturnsCorrectCost(string model, long prompt, long completion, decimal expected)
     {
         var data = new CachedLogData

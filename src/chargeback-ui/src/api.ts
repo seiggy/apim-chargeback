@@ -1,16 +1,27 @@
-import { PublicClientApplication, type SilentRequest } from "@azure/msal-browser";
+import { InteractionRequiredAuthError, PublicClientApplication, type SilentRequest } from "@azure/msal-browser";
 import { msalConfig, loginRequest } from "./auth/msalConfig";
 import type { LogsResponse, ChargebackResponse, QuotasResponse, QuotaUpdateRequest, QuotaData, PlansResponse, PlanCreateRequest, PlanUpdateRequest, PlanData, ClientsResponse, ClientAssignRequest, ClientUsageResponse, ClientTracesResponse, UsageSummaryResponse, RequestLogsResponse, ModelPricingResponse, ModelPricingCreateRequest, ModelPricing, ExportPeriodsResponse, DeploymentsResponse } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
 const msalInstance = new PublicClientApplication(msalConfig);
+let redirectInFlight = false;
 
 // Initialize MSAL and handle redirect/popup responses on page load.
 // This is critical — without it, popup auth flow will hang.
 const msalReady = msalInstance.initialize().then(() => {
   return msalInstance.handleRedirectPromise();
 });
+
+function isInteractionInProgress(): boolean {
+  return redirectInFlight || window.sessionStorage.getItem("msal.interaction.status") === "interaction_in_progress";
+}
+
+async function startRedirectOnce(): Promise<void> {
+  if (isInteractionInProgress()) return;
+  redirectInFlight = true;
+  await msalInstance.acquireTokenRedirect(loginRequest);
+}
 
 async function getToken(): Promise<string | null> {
   await msalReady;
@@ -20,15 +31,33 @@ async function getToken(): Promise<string | null> {
     const request: SilentRequest = { ...loginRequest, account: accounts[0] };
     const response = await msalInstance.acquireTokenSilent(request);
     return response.accessToken;
-  } catch {
-    // Silent token acquisition failed — redirect to login
-    await msalInstance.acquireTokenRedirect(loginRequest);
-    return null;
+  } catch (error) {
+    // Only initiate interactive auth when MSAL explicitly requires it.
+    // Avoid re-entrant redirects that cause interaction_in_progress loops.
+    if (error instanceof InteractionRequiredAuthError) {
+      await startRedirectOnce();
+      return null;
+    }
+    if ((error as { errorCode?: string })?.errorCode === "interaction_in_progress") {
+      return null;
+    }
+    throw error;
+  } finally {
+    if (!isInteractionInProgress()) {
+      redirectInFlight = false;
+    }
   }
 }
 
 async function authFetch(url: string, options: RequestInit = {}): Promise<Response> {
-  const token = await getToken();
+  let token: string | null = null;
+  try {
+    token = await getToken();
+  } catch {
+    // If token acquisition fails for non-interactive reasons, continue without
+    // auth header so the caller gets a normal backend 401/403 response.
+    token = null;
+  }
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...(options.headers as Record<string, string> ?? {}),
@@ -37,10 +66,6 @@ async function authFetch(url: string, options: RequestInit = {}): Promise<Respon
     headers["Authorization"] = `Bearer ${token}`;
   }
   const res = await fetch(url, { ...options, headers });
-  if (res.status === 401) {
-    await msalInstance.acquireTokenRedirect(loginRequest);
-    return res; // Won't reach here — redirect navigates away
-  }
   return res;
 }
 

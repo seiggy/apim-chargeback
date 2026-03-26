@@ -33,7 +33,30 @@
 		<set-variable name="audience" value="@(context.Request.Headers.GetValueOrDefault("Authorization","").Split(' ').Last().AsJwt()?.Claims.GetValueOrDefault("aud",""))" />
 		<!-- Set variables for later use -->
 		<set-variable name="requestBody" value="@(context.Request.Body.As<string>(preserveContent: true))" />
-		<set-variable name="deploymentId" value="@(context.Request.Url.Path.Split('/').ElementAtOrDefault(3))" />
+		<!-- Extract deploymentId from URL path (/deployments/{id}/...) or fall back to
+		     the "model" field in the JSON request body for routes like /responses, /models -->
+		<set-variable name="deploymentId" value="@{
+			var path = context.Request.Url.Path;
+			var marker = "/deployments/";
+			var idx = path.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+			if (idx >= 0) {
+				var rest = path.Substring(idx + marker.Length);
+				var slash = rest.IndexOf('/');
+				if (slash >= 0) { return rest.Substring(0, slash); }
+				return rest;
+			}
+			try {
+				var body = context.Variables.GetValueOrDefault<string>("requestBody");
+				if (!string.IsNullOrEmpty(body)) {
+					var json = Newtonsoft.Json.Linq.JObject.Parse(body);
+					var model = json["model"]?.ToString();
+					if (!string.IsNullOrEmpty(model)) { return model; }
+				}
+			} catch { }
+			var segments = path.Split('/');
+			if (segments.Length > 1) { return segments[segments.Length - 1]; }
+			return "unknown";
+		}" />
 		<!-- Acquire a token from APIM's managed identity for the Container App audience -->
 		<authentication-managed-identity resource="{{ContainerAppAudience}}" output-token-variable-name="msi-access-token" ignore-error="false" />
 		<!-- Pre-check: verify client has a valid plan and is within quota BEFORE calling OpenAI -->

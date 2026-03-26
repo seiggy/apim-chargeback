@@ -15,6 +15,7 @@ public static class ClientDetailEndpoints
         routes.MapGet("/api/clients/{clientAppId}/{tenantId}/usage", GetClientUsage)
             .WithName("GetClientUsage")
             .WithDescription("Get per-customer usage report including costs and rate limits")
+            .RequireAuthorization()
             .Produces<ClientUsageResponse>()
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status500InternalServerError);
@@ -22,6 +23,7 @@ public static class ClientDetailEndpoints
         routes.MapGet("/api/clients/{clientAppId}/{tenantId}/traces", GetClientTraces)
             .WithName("GetClientTraces")
             .WithDescription("Get recent trace records for a customer")
+            .RequireAuthorization()
             .Produces<ClientTracesResponse>()
             .Produces(StatusCodes.Status500InternalServerError);
 
@@ -38,7 +40,6 @@ public static class ClientDetailEndpoints
         try
         {
             var db = redis.GetDatabase();
-            var server = redis.GetServers().First();
             var usagePolicy = await usagePolicyStore.GetAsync(db);
 
             var clientValue = await db.StringGetAsync(RedisKeys.Client(clientAppId, tenantId));
@@ -63,7 +64,7 @@ public static class ClientDetailEndpoints
             if (planValue.HasValue)
                 plan = JsonSerializer.Deserialize<PlanData>((string)planValue!, JsonConfig.Default);
 
-            var logKeys = server.Keys(pattern: RedisKeys.CustomerLogPattern(clientAppId, tenantId)).ToArray();
+            var logKeys = redis.KeysFromAllServers(RedisKeys.CustomerLogPattern(clientAppId, tenantId));
             var logs = new List<LogEntry>();
             var usageByModel = new Dictionary<string, long>();
             decimal totalCostToUs = 0m;

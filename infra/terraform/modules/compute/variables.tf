@@ -23,6 +23,17 @@ variable "log_analytics_workspace_id" {
   type        = string
 }
 
+variable "log_analytics_workspace_customer_id" {
+  description = "Workspace (customer) ID of the Log Analytics workspace for OTEL config."
+  type        = string
+}
+
+variable "log_analytics_workspace_shared_key" {
+  description = "Primary shared key of the Log Analytics workspace for OTEL config."
+  type        = string
+  sensitive   = true
+}
+
 variable "redis_hostname" {
   description = "Hostname of the Redis Enterprise cluster."
   type        = string

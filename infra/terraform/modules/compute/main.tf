@@ -2,6 +2,17 @@
 # Compute module – ACR, Storage, Key Vault, Container App Environment & App
 # ---------------------------------------------------------------------------
 
+terraform {
+  required_providers {
+    azapi = {
+      source = "azure/azapi"
+    }
+    azurerm = {
+      source = "hashicorp/azurerm"
+    }
+  }
+}
+
 data "azurerm_client_config" "current" {}
 
 # =============================================================================
@@ -62,6 +73,59 @@ resource "azurerm_container_app_environment" "this" {
   resource_group_name        = var.resource_group_name
   log_analytics_workspace_id = var.log_analytics_workspace_id
   tags                       = var.tags
+}
+
+# =============================================================================
+# Aspire Dashboard – managed dotnet component on the environment
+# =============================================================================
+
+resource "azapi_resource" "aspire_dashboard" {
+  type      = "Microsoft.App/managedEnvironments/dotNetComponents@2024-10-02-preview"
+  name      = "aspire-dashboard"
+  parent_id = azurerm_container_app_environment.this.id
+
+  body = {
+    properties = {
+      componentType = "AspireDashboard"
+    }
+  }
+}
+
+# =============================================================================
+# OpenTelemetry configuration on the environment — routes to App Insights
+# Must include logAnalyticsConfiguration in the body because the preview API
+# treats PATCH as a full replace of the properties envelope.
+# =============================================================================
+
+resource "azapi_update_resource" "otel_config" {
+  type        = "Microsoft.App/managedEnvironments@2024-02-02-preview"
+  resource_id = azurerm_container_app_environment.this.id
+
+  body = {
+    properties = {
+      appLogsConfiguration = {
+        destination = "log-analytics"
+        logAnalyticsConfiguration = {
+          customerId = var.log_analytics_workspace_customer_id
+          sharedKey  = var.log_analytics_workspace_shared_key
+        }
+      }
+      appInsightsConfiguration = {
+        connectionString = var.app_insights_connection_string
+      }
+      openTelemetryConfiguration = {
+        tracesConfiguration = {
+          destinations = ["appInsights"]
+        }
+        logsConfiguration = {
+          destinations = ["appInsights"]
+        }
+        metricsConfiguration = {
+          destinations = ["appInsights"]
+        }
+      }
+    }
+  }
 }
 
 # =============================================================================
