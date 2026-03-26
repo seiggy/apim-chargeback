@@ -30,7 +30,14 @@ public sealed class DeploymentDiscoveryService : IDeploymentDiscoveryService
         _redis = redis;
         _configuration = configuration;
         _logger = logger;
-        _credential = new DefaultAzureCredential();
+        _credential = new DefaultAzureCredential(new DefaultAzureCredentialOptions
+        {
+            ExcludeVisualStudioCredential = true,
+            ExcludeVisualStudioCodeCredential = true,
+            ExcludeAzureCliCredential = true,
+            ExcludeAzurePowerShellCredential = true,
+            ExcludeAzureDeveloperCliCredential = true,
+        });
     }
 
     public async Task<List<DeploymentInfo>> GetDeploymentsAsync(CancellationToken ct = default)
@@ -49,24 +56,29 @@ public sealed class DeploymentDiscoveryService : IDeploymentDiscoveryService
             catch (JsonException) { }
         }
 
+        var subscriptionId = _configuration["AZURE_SUBSCRIPTION_ID"];
+        var resourceGroup = _configuration["AZURE_RESOURCE_GROUP"];
         var endpoint = _configuration["AZURE_AI_ENDPOINT"];
-        if (string.IsNullOrWhiteSpace(endpoint))
+        if (string.IsNullOrWhiteSpace(subscriptionId) || string.IsNullOrWhiteSpace(resourceGroup) || string.IsNullOrWhiteSpace(endpoint))
         {
-            _logger.LogWarning("AZURE_AI_ENDPOINT not configured — returning empty deployment list");
+            _logger.LogWarning("AZURE_SUBSCRIPTION_ID, AZURE_RESOURCE_GROUP, or AZURE_AI_ENDPOINT not configured — returning empty deployment list");
             return [];
         }
 
+        // Derive the account name from the endpoint URL (e.g. https://chrgbk-ai.cognitiveservices.azure.com/)
+        var uri = new Uri(endpoint);
+        var accountName = uri.Host.Split('.')[0];
+
         try
         {
-            // Get token for Azure Cognitive Services
+            // Use the management plane API to list deployments (works for AI Services multi-service accounts)
             var tokenResult = await _credential.GetTokenAsync(
-                new TokenRequestContext(["https://cognitiveservices.azure.com/.default"]), ct);
+                new TokenRequestContext(["https://management.azure.com/.default"]), ct);
 
             using var httpClient = new HttpClient();
             httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", tokenResult.Token);
 
-            // Call the Azure OpenAI deployments list API
-            var apiUrl = $"{endpoint.TrimEnd('/')}/openai/deployments?api-version=2024-10-21";
+            var apiUrl = $"https://management.azure.com/subscriptions/{subscriptionId}/resourceGroups/{resourceGroup}/providers/Microsoft.CognitiveServices/accounts/{accountName}/deployments?api-version=2024-10-01";
             var response = await httpClient.GetAsync(apiUrl, ct);
             response.EnsureSuccessStatusCode();
 
@@ -74,16 +86,17 @@ public sealed class DeploymentDiscoveryService : IDeploymentDiscoveryService
             using var doc = JsonDocument.Parse(body);
 
             var deployments = new List<DeploymentInfo>();
-            if (doc.RootElement.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Array)
+            if (doc.RootElement.TryGetProperty("value", out var data) && data.ValueKind == JsonValueKind.Array)
             {
                 foreach (var item in data.EnumerateArray())
                 {
-                    var id = item.GetProperty("id").GetString() ?? "";
+                    var name = item.GetProperty("name").GetString() ?? "";
                     var model = "";
                     var modelVersion = "";
-                    if (item.TryGetProperty("model", out var modelProp) && modelProp.ValueKind == JsonValueKind.String)
+                    if (item.TryGetProperty("properties", out var props) && props.TryGetProperty("model", out var modelObj))
                     {
-                        model = modelProp.GetString() ?? "";
+                        model = modelObj.TryGetProperty("name", out var mn) ? mn.GetString() ?? "" : "";
+                        modelVersion = modelObj.TryGetProperty("version", out var mv) ? mv.GetString() ?? "" : "";
                     }
 
                     var skuName = "";
@@ -96,7 +109,7 @@ public sealed class DeploymentDiscoveryService : IDeploymentDiscoveryService
 
                     deployments.Add(new DeploymentInfo
                     {
-                        Id = id,
+                        Id = name,
                         Model = model,
                         ModelVersion = modelVersion,
                         SkuName = skuName,
@@ -109,12 +122,12 @@ public sealed class DeploymentDiscoveryService : IDeploymentDiscoveryService
             var cacheValue = JsonSerializer.Serialize(deployments, JsonConfig.Default);
             await db.StringSetAsync(CacheKey, cacheValue, CacheTtl);
 
-            _logger.LogInformation("Fetched {Count} deployments from Azure AI Foundry", deployments.Count);
+            _logger.LogInformation("Fetched {Count} deployments from Azure AI Services", deployments.Count);
             return deployments;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to fetch deployments from Azure AI Foundry");
+            _logger.LogError(ex, "Failed to fetch deployments from Azure AI Services");
             return [];
         }
     }

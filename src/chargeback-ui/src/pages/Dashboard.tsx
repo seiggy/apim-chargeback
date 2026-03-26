@@ -15,13 +15,17 @@ import {
 import { useTheme } from "../context/ThemeProvider"
 
 const MODEL_COLORS: Record<string, { variant: "blue" | "green" | "teal" | "amber" | "cyan" | "red"; hex: string }> = {
+  "gpt-5.3-codex": { variant: "blue", hex: "#0078D4" },
+  "gpt-5.2": { variant: "blue", hex: "#005A9E" },
+  "gpt-4.1": { variant: "teal", hex: "#00B7C3" },
+  "gpt-4.1-mini": { variant: "cyan", hex: "#00B7C3" },
+  "gpt-4.1-nano": { variant: "green", hex: "#107C10" },
+  "gpt-4o": { variant: "amber", hex: "#FFB900" },
+  "gpt-4o-mini": { variant: "amber", hex: "#FFB900" },
   "gpt-4": { variant: "blue", hex: "#0078D4" },
-  "gpt-4o": { variant: "teal", hex: "#00B7C3" },
-  "gpt-4o-mini": { variant: "cyan", hex: "#00B7C3" },
-  "gpt-35-turbo": { variant: "green", hex: "#107C10" },
-  "gpt-3.5-turbo": { variant: "green", hex: "#107C10" },
+  "gpt-oss-120b": { variant: "green", hex: "#107C10" },
   "dall-e-3": { variant: "red", hex: "#D13438" },
-  "text-embedding-ada-002": { variant: "amber", hex: "#FFB900" },
+  "text-embedding-3-large": { variant: "amber", hex: "#FFB900" },
 }
 
 const PIE_COLORS = ["#0078D4", "#00B7C3", "#107C10", "#FFB900", "#D13438", "#8764B8", "#005A9E", "#106EBE"]

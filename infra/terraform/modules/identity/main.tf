@@ -4,8 +4,14 @@
 
 data "azuread_client_config" "current" {}
 
-# Random UUID for the OAuth2 permission scope
+# Random UUIDs for OAuth2 permission scopes
 resource "random_uuid" "oauth2_scope_id" {}
+resource "random_uuid" "gateway_scope_id" {}
+
+# Placeholder UUIDs for identifier_uris (replaced by local-exec after creation
+# because the real value is api://{client_id} which isn't known until apply time)
+resource "random_uuid" "gateway_app_placeholder" {}
+resource "random_uuid" "api_app_placeholder" {}
 
 # Random UUIDs for app role IDs
 resource "random_uuid" "role_export" {}
@@ -13,12 +19,66 @@ resource "random_uuid" "role_admin" {}
 resource "random_uuid" "role_apim" {}
 
 # =============================================================================
-# API App Registration (multi-tenant)
+# APIM Gateway App Registration (multi-tenant)
+# External clients authenticate against this app to access OpenAI via APIM.
+# =============================================================================
+
+resource "azuread_application" "gateway" {
+  display_name     = "Chargeback APIM Gateway"
+  sign_in_audience = "AzureADMultipleOrgs"
+  identifier_uris  = ["api://${random_uuid.gateway_app_placeholder.result}"]
+
+  api {
+    oauth2_permission_scope {
+      id                         = random_uuid.gateway_scope_id.result
+      admin_consent_display_name = "Access OpenAI via APIM Gateway"
+      admin_consent_description  = "Allows the app to call Azure OpenAI endpoints through the APIM chargeback gateway"
+      type                       = "Admin"
+      value                      = "access_as_user"
+      enabled                    = true
+    }
+  }
+
+  # Microsoft Graph openid — required for third-party tenant consent/install
+  required_resource_access {
+    resource_app_id = "00000003-0000-0000-c000-000000000000" # Microsoft Graph
+
+    resource_access {
+      id   = "37f7f235-527c-4136-accd-4a02d197296e" # openid
+      type = "Scope"
+    }
+  }
+
+  lifecycle {
+    ignore_changes = [identifier_uris]
+  }
+}
+
+# Set the real identifier URI (api://{client_id}) after the app is created.
+# The inline identifier_uris uses a placeholder because client_id isn't known
+# until after creation. This provisioner updates it to the canonical value.
+resource "terraform_data" "gateway_identifier_uri" {
+  depends_on = [azuread_application.gateway]
+
+  provisioner "local-exec" {
+    command = "az ad app update --id ${azuread_application.gateway.client_id} --identifier-uris api://${azuread_application.gateway.client_id}"
+  }
+}
+
+resource "azuread_service_principal" "gateway" {
+  client_id  = azuread_application.gateway.client_id
+  depends_on = [terraform_data.gateway_identifier_uri]
+}
+
+# =============================================================================
+# Chargeback API App Registration (single-tenant)
+# Only APIM's managed identity and dashboard users access this directly.
 # =============================================================================
 
 resource "azuread_application" "api" {
   display_name     = "Chargeback API"
-  sign_in_audience = "AzureADMultipleOrgs"
+  sign_in_audience = "AzureADMyOrg"
+  identifier_uris  = ["api://${random_uuid.api_app_placeholder.result}"]
 
   api {
     oauth2_permission_scope {
@@ -51,7 +111,7 @@ resource "azuread_application" "api" {
 
   app_role {
     id                   = random_uuid.role_apim.result
-    display_name         = "Chargeback APIM"
+    display_name         = "APIM Service"
     description          = "API Management service access"
     value                = "Chargeback.Apim"
     allowed_member_types = ["Application"]
@@ -66,19 +126,28 @@ resource "azuread_application" "api" {
       type = "Scope"
     }
   }
+
+  lifecycle {
+    ignore_changes = [identifier_uris]
+  }
 }
 
-resource "azuread_application_identifier_uri" "api" {
-  application_id = azuread_application.api.id
-  identifier_uri = "api://${azuread_application.api.client_id}"
+# Set the real identifier URI after creation (same pattern as gateway app).
+resource "terraform_data" "api_identifier_uri" {
+  depends_on = [azuread_application.api]
+
+  provisioner "local-exec" {
+    command = "az ad app update --id ${azuread_application.api.client_id} --identifier-uris api://${azuread_application.api.client_id}"
+  }
 }
 
 resource "azuread_service_principal" "api" {
-  client_id = azuread_application.api.client_id
+  client_id  = azuread_application.api.client_id
+  depends_on = [terraform_data.api_identifier_uri]
 }
 
 # =============================================================================
-# Client App 1 – single-tenant sample client
+# Client App 1 – single-tenant sample client → targets APIM Gateway
 # =============================================================================
 
 resource "azuread_application" "client1" {
@@ -86,10 +155,10 @@ resource "azuread_application" "client1" {
   sign_in_audience = "AzureADMyOrg"
 
   required_resource_access {
-    resource_app_id = azuread_application.api.client_id
+    resource_app_id = azuread_application.gateway.client_id
 
     resource_access {
-      id   = random_uuid.oauth2_scope_id.result
+      id   = random_uuid.gateway_scope_id.result
       type = "Scope"
     }
   }
@@ -125,7 +194,7 @@ resource "azuread_app_role_assignment" "client1_admin" {
 }
 
 # =============================================================================
-# Client App 2 – multi-tenant demo client
+# Client App 2 – multi-tenant demo client → targets APIM Gateway
 # =============================================================================
 
 resource "azuread_application" "client2" {
@@ -133,10 +202,10 @@ resource "azuread_application" "client2" {
   sign_in_audience = "AzureADMultipleOrgs"
 
   required_resource_access {
-    resource_app_id = azuread_application.api.client_id
+    resource_app_id = azuread_application.gateway.client_id
 
     resource_access {
-      id   = random_uuid.oauth2_scope_id.result
+      id   = random_uuid.gateway_scope_id.result
       type = "Scope"
     }
   }
@@ -170,17 +239,17 @@ resource "azuread_application_password" "client2" {
 }
 
 # =============================================================================
-# Admin consent grants – delegated permission grants
+# Admin consent grants – delegated permission grants on the GATEWAY app
 # =============================================================================
 
 resource "azuread_service_principal_delegated_permission_grant" "client1" {
   service_principal_object_id          = azuread_service_principal.client1.object_id
-  resource_service_principal_object_id = azuread_service_principal.api.object_id
+  resource_service_principal_object_id = azuread_service_principal.gateway.object_id
   claim_values                         = ["access_as_user"]
 }
 
 resource "azuread_service_principal_delegated_permission_grant" "client2" {
   service_principal_object_id          = azuread_service_principal.client2.object_id
-  resource_service_principal_object_id = azuread_service_principal.api.object_id
+  resource_service_principal_object_id = azuread_service_principal.gateway.object_id
   claim_values                         = ["access_as_user"]
 }

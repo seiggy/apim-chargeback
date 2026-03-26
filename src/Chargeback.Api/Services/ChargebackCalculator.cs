@@ -19,11 +19,15 @@ public sealed class ChargebackCalculator : IChargebackCalculator
     // Fallback defaults for when Redis has no pricing data
     private static readonly Dictionary<string, (decimal Prompt, decimal Completion, decimal Image)> Defaults = new(StringComparer.OrdinalIgnoreCase)
     {
+        ["gpt-5.2"] = (0.03m, 0.12m, 0m),
+        ["gpt-5.3-codex"] = (0.035m, 0.14m, 0m),
+        ["gpt-4.1"] = (0.02m, 0.08m, 0m),
+        ["gpt-4.1-mini"] = (0.004m, 0.016m, 0m),
+        ["gpt-4.1-nano"] = (0.001m, 0.004m, 0m),
         ["gpt-4o"] = (0.03m, 0.06m, 0m),
         ["gpt-4o-mini"] = (0.005m, 0.015m, 0m),
         ["gpt-4"] = (0.02m, 0.05m, 0m),
-        ["gpt-35-turbo"] = (0.0015m, 0.002m, 0m),
-        ["gpt-35-turbo-instruct"] = (0.0018m, 0.0025m, 0m),
+        ["gpt-oss-120b"] = (0.008m, 0.032m, 0m),
         ["text-embedding-3-large"] = (0.001m, 0.002m, 0m),
         ["dall-e-3"] = (0m, 0m, 0.009m),
     };
@@ -50,8 +54,7 @@ public sealed class ChargebackCalculator : IChargebackCalculator
         try
         {
             var db = _redis.GetDatabase();
-            var server = _redis.GetServers().First();
-            var keys = server.Keys(pattern: RedisKeys.PricingPrefix).ToArray();
+            var keys = _redis.KeysFromAllServers(RedisKeys.PricingPrefix);
             var cache = new Dictionary<string, ModelPricing>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var key in keys)

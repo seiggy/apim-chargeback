@@ -58,13 +58,106 @@ Write-Host "    Container App: $containerAppName" -ForegroundColor Green
 $acrLoginServer = az acr show --name $acrName --query "loginServer" -o tsv
 Write-Host "    ACR Login Server: $acrLoginServer" -ForegroundColor Green
 
-# Resolve API app ID and tenant for UI auth config
-$tenantId = (az account show --query "tenantId" -o tsv)
-$containerAppFqdn = az containerapp show --name $containerAppName --resource-group $ResourceGroupName --query "properties.configuration.ingress.fqdn" -o tsv
+# Resolve infrastructure details — prefer Terraform outputs when available,
+# fall back to Azure CLI queries for standalone usage.
+$tfDir = Join-Path $RepoRoot "infra\terraform"
+$tenantId = $null; $apiAppId = $null; $containerAppFqdn = $null
+if (Test-Path (Join-Path $tfDir "terraform.tfstate")) {
+    Push-Location $tfDir
+    try {
+        $tenantId = (terraform output -raw tenant_id 2>$null)
+        $apiAppId = (terraform output -raw api_app_id 2>$null)
+        $containerAppFqdn = (terraform output -raw container_app_url 2>$null) -replace '^https://',''
+    } catch {}
+    Pop-Location
+}
+if ([string]::IsNullOrWhiteSpace($tenantId)) { $tenantId = az account show --query "tenantId" -o tsv }
+if ([string]::IsNullOrWhiteSpace($containerAppFqdn)) {
+    $containerAppFqdn = az containerapp show --name $containerAppName --resource-group $ResourceGroupName --query "properties.configuration.ingress.fqdn" -o tsv
+}
+if ([string]::IsNullOrWhiteSpace($apiAppId)) {
+    $apiAppId = az ad app list --display-name "Chargeback API" --query "[0].appId" -o tsv
+}
+Write-Host "    Tenant: $tenantId" -ForegroundColor Green
+Write-Host "    API App: $apiAppId" -ForegroundColor Green
+Write-Host "    Container App FQDN: $containerAppFqdn" -ForegroundColor Green
 
-# Look up the Entra API app for dashboard auth config
-$apiAppId = az ad app list --display-name "Chargeback API" --query "[0].appId" -o tsv
-$client1AppId = az ad app list --display-name "Chargeback Sample Client" --query "[0].appId" -o tsv
+# ── Step 1b: Ensure Entra app config is correct ──────────────────────
+# The AzureAD Terraform provider has eventual-consistency issues where
+# identifier URIs and redirect URIs silently fail. This step guarantees
+# all Entra app config is correct before we build the container image
+# (which bakes the UI env file into the image).
+
+Write-Host ""
+Write-Host "  Step 1b: Verifying Entra ID app configuration..." -ForegroundColor Yellow
+
+$graphToken = az account get-access-token --resource https://graph.microsoft.com --query accessToken -o tsv
+
+# ── API App: identifier URI ──
+$currentUris = @(az ad app show --id $apiAppId --query "identifierUris[]" -o tsv)
+if ($currentUris -notcontains "api://$apiAppId") {
+    Write-Host "    ⚠ API identifier URI missing — adding api://$apiAppId" -ForegroundColor DarkYellow
+    az ad app update --id $apiAppId --identifier-uris "api://$apiAppId"
+} else {
+    Write-Host "    ✓ API identifier URI: api://$apiAppId" -ForegroundColor Green
+}
+
+# ── API App: SPA redirect URIs ──
+$currentSpa = @(az ad app show --id $apiAppId --query "spa.redirectUris[]" -o tsv)
+$requiredUris = @("https://$containerAppFqdn", "http://localhost:5173")
+$missing = @($requiredUris | Where-Object { $currentSpa -notcontains $_ })
+if ($missing.Count -gt 0) {
+    Write-Host "    ⚠ SPA redirect URIs missing — setting..." -ForegroundColor DarkYellow
+    $allUris = @(@($currentSpa) + @($requiredUris) | Where-Object { $_ } | Select-Object -Unique)
+    $objId = az ad app show --id $apiAppId --query "id" -o tsv
+    $body = @{spa=@{redirectUris=$allUris}} | ConvertTo-Json -Depth 5 -Compress
+    Invoke-RestMethod -Method Patch -Uri "https://graph.microsoft.com/v1.0/applications/$objId" -Headers @{Authorization="Bearer $graphToken"; 'Content-Type'='application/json'} -Body $body
+    Write-Host "    ✓ SPA redirect URIs configured" -ForegroundColor Green
+} else {
+    Write-Host "    ✓ SPA redirect URIs OK" -ForegroundColor Green
+}
+
+# ── Gateway App: identifier URI ──
+$gatewayAppId = $null
+if (Test-Path (Join-Path $tfDir "terraform.tfstate")) {
+    Push-Location $tfDir
+    try { $gatewayAppId = (terraform output -raw gateway_app_id 2>$null) } catch {}
+    Pop-Location
+}
+if (-not [string]::IsNullOrWhiteSpace($gatewayAppId)) {
+    $gwUris = @(az ad app show --id $gatewayAppId --query "identifierUris[]" -o tsv)
+    if ($gwUris -notcontains "api://$gatewayAppId") {
+        Write-Host "    ⚠ Gateway identifier URI missing — adding api://$gatewayAppId" -ForegroundColor DarkYellow
+        az ad app update --id $gatewayAppId --identifier-uris "api://$gatewayAppId"
+    } else {
+        Write-Host "    ✓ Gateway identifier URI: api://$gatewayAppId" -ForegroundColor Green
+    }
+} else {
+    Write-Host "    ⊘ Gateway app ID not found — skipping" -ForegroundColor DarkGray
+}
+
+# ── API App: service principal exists ──
+$apiSpId = az ad sp list --filter "appId eq '$apiAppId'" --query "[0].id" -o tsv
+if ([string]::IsNullOrWhiteSpace($apiSpId)) {
+    Write-Host "    ⚠ API service principal missing — creating..." -ForegroundColor DarkYellow
+    az ad sp create --id $apiAppId -o none
+    $apiSpId = az ad sp list --filter "appId eq '$apiAppId'" --query "[0].id" -o tsv
+    Write-Host "    ✓ API service principal created" -ForegroundColor Green
+} else {
+    Write-Host "    ✓ API service principal exists" -ForegroundColor Green
+}
+
+# ── Gateway App: service principal exists ──
+if (-not [string]::IsNullOrWhiteSpace($gatewayAppId)) {
+    $gwSpId = az ad sp list --filter "appId eq '$gatewayAppId'" --query "[0].id" -o tsv
+    if ([string]::IsNullOrWhiteSpace($gwSpId)) {
+        Write-Host "    ⚠ Gateway service principal missing — creating..." -ForegroundColor DarkYellow
+        az ad sp create --id $gatewayAppId -o none
+        Write-Host "    ✓ Gateway service principal created" -ForegroundColor Green
+    } else {
+        Write-Host "    ✓ Gateway service principal exists" -ForegroundColor Green
+    }
+}
 
 # ── Step 2: Write UI auth config ─────────────────────────────────────
 
@@ -75,9 +168,8 @@ $uiEnvDir = Join-Path $RepoRoot "src\chargeback-ui"
 $uiEnvFile = Join-Path $uiEnvDir ".env.production.local"
 $uiEnvContent = @(
     "VITE_AZURE_TENANT_ID=$tenantId"
-    "VITE_AZURE_CLIENT_ID=$client1AppId"
+    "VITE_AZURE_CLIENT_ID=$apiAppId"
     "VITE_AZURE_API_APP_ID=$apiAppId"
-    "VITE_AZURE_REDIRECT_URI=https://$containerAppFqdn/"
     "VITE_AZURE_SCOPE=api://$apiAppId/access_as_user"
     "VITE_API_URL=https://$containerAppFqdn"
 )

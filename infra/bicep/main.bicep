@@ -2,7 +2,6 @@
 param apimInstanceName string
 param oaiApiName string
 param funcApiName string
-param apiSpecFileUri string
 @description('Name of the Container App for the .NET chargeback API.')
 param containerAppName string = 'ca-chargeback'
 @description('Name of the Container App Environment.')
@@ -191,11 +190,11 @@ module aiServices './aiService.bicep' = {
     tags: union(tags, {})
     deployments: [
       {
-        name: 'gpt-4o'
+        name: 'gpt-4.1'
         model: {
           format: 'OpenAI'
-          name: 'gpt-4o'
-          version: '2024-11-20'                   
+          name: 'gpt-4.1'
+          version: '2025-04-14'                   
         }
         raiPolicyName: 'Microsoft.Default'
         versionUpgradeOption: 'OnceCurrentVersionExpired'
@@ -205,11 +204,11 @@ module aiServices './aiService.bicep' = {
         }        
       }
       {
-        name: 'gpt-4o-mini'
+        name: 'gpt-4.1-mini'
         model: {
           format: 'OpenAI'
-          name: 'gpt-4o-mini' 
-          version: '2024-07-18'
+          name: 'gpt-4.1-mini' 
+          version: '2025-04-14'
         }
         raiPolicyName: 'Microsoft.Default'
         versionUpgradeOption: 'OnceCurrentVersionExpired'
@@ -217,7 +216,7 @@ module aiServices './aiService.bicep' = {
           name: 'GlobalStandard'
           capacity: 5
         }
-      }      
+      }
       {
         name: 'text-embedding'
         model: {
@@ -339,7 +338,6 @@ module apimOaiApi './apimOaiApi.bicep' = {
   ]
   params: {
     apimInstanceName: apimInstanceName
-    apiSpecFileUri: apiSpecFileUri
     oaiApiName: oaiApiName
     openAiServiceUrl: openAiServiceUrl
   }

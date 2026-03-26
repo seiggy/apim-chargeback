@@ -12,11 +12,15 @@ public static class PricingEndpoints
 {
     private static readonly Dictionary<string, ModelPricing> DefaultPricing = new()
     {
+        ["gpt-5.2"] = new() { ModelId = "gpt-5.2", DisplayName = "GPT-5.2", PromptRatePer1K = 0.03m, CompletionRatePer1K = 0.12m },
+        ["gpt-5.3-codex"] = new() { ModelId = "gpt-5.3-codex", DisplayName = "GPT-5.3 Codex", PromptRatePer1K = 0.035m, CompletionRatePer1K = 0.14m },
+        ["gpt-4.1"] = new() { ModelId = "gpt-4.1", DisplayName = "GPT-4.1", PromptRatePer1K = 0.02m, CompletionRatePer1K = 0.08m },
+        ["gpt-4.1-mini"] = new() { ModelId = "gpt-4.1-mini", DisplayName = "GPT-4.1 Mini", PromptRatePer1K = 0.004m, CompletionRatePer1K = 0.016m },
+        ["gpt-4.1-nano"] = new() { ModelId = "gpt-4.1-nano", DisplayName = "GPT-4.1 Nano", PromptRatePer1K = 0.001m, CompletionRatePer1K = 0.004m },
         ["gpt-4o"] = new() { ModelId = "gpt-4o", DisplayName = "GPT-4o", PromptRatePer1K = 0.03m, CompletionRatePer1K = 0.06m },
         ["gpt-4o-mini"] = new() { ModelId = "gpt-4o-mini", DisplayName = "GPT-4o Mini", PromptRatePer1K = 0.005m, CompletionRatePer1K = 0.015m },
         ["gpt-4"] = new() { ModelId = "gpt-4", DisplayName = "GPT-4", PromptRatePer1K = 0.02m, CompletionRatePer1K = 0.05m },
-        ["gpt-35-turbo"] = new() { ModelId = "gpt-35-turbo", DisplayName = "GPT-3.5 Turbo", PromptRatePer1K = 0.0015m, CompletionRatePer1K = 0.002m },
-        ["gpt-35-turbo-instruct"] = new() { ModelId = "gpt-35-turbo-instruct", DisplayName = "GPT-3.5 Turbo Instruct", PromptRatePer1K = 0.0018m, CompletionRatePer1K = 0.0025m },
+        ["gpt-oss-120b"] = new() { ModelId = "gpt-oss-120b", DisplayName = "GPT-OSS 120B", PromptRatePer1K = 0.008m, CompletionRatePer1K = 0.032m },
         ["text-embedding-3-large"] = new() { ModelId = "text-embedding-3-large", DisplayName = "Text Embedding 3 Large", PromptRatePer1K = 0.001m, CompletionRatePer1K = 0.002m },
         ["dall-e-3"] = new() { ModelId = "dall-e-3", DisplayName = "DALL-E 3", ImageRatePer1K = 0.009m },
     };
@@ -26,6 +30,7 @@ public static class PricingEndpoints
         routes.MapGet("/api/pricing", GetPricing)
             .WithName("GetPricing")
             .WithDescription("List all model pricing configurations")
+            .RequireAuthorization()
             .Produces<ModelPricingResponse>();
 
         routes.MapPut("/api/pricing/{modelId}", UpsertPricing)
@@ -54,8 +59,7 @@ public static class PricingEndpoints
         try
         {
             var db = redis.GetDatabase();
-            var server = redis.GetServers().First();
-            var keys = server.Keys(pattern: RedisKeys.PricingPrefix).ToArray();
+            var keys = redis.KeysFromAllServers(RedisKeys.PricingPrefix);
 
             // Seed defaults on first run
             if (keys.Length == 0)
@@ -69,7 +73,7 @@ public static class PricingEndpoints
                     await db.StringSetAsync(cacheKey, cacheValue);
                 }
 
-                keys = server.Keys(pattern: RedisKeys.PricingPrefix).ToArray();
+                keys = redis.KeysFromAllServers(RedisKeys.PricingPrefix);
             }
 
             logger.LogInformation("Fetched {KeyCount} pricing keys from Redis", keys.Length);

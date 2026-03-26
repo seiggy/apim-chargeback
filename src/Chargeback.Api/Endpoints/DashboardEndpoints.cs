@@ -14,21 +14,25 @@ public static class DashboardEndpoints
         routes.MapGet("/api/usage", GetUsageSummary)
             .WithName("GetUsageSummary")
             .WithDescription("Fetch aggregated usage summaries with calculated costs")
+            .RequireAuthorization()
             .Produces<UsageSummaryResponse>();
 
         routes.MapGet("/logs", GetLogs)
             .WithName("GetLogs")
             .WithDescription("Legacy: Fetch all cached log data with calculated costs")
+            .RequireAuthorization()
             .Produces<LogsResponse>();
 
         routes.MapGet("/api/logs", GetRequestLogs)
             .WithName("GetRequestLogs")
             .WithDescription("Fetch individual request log entries from trace records")
+            .RequireAuthorization()
             .Produces<RequestLogsResponse>();
 
         routes.MapGet("/chargeback", GetChargeback)
             .WithName("GetChargeback")
             .WithDescription("Calculate total chargeback and return itemized logs")
+            .RequireAuthorization()
             .Produces<ChargebackResponse>();
 
         routes.MapDelete("/api/admin/redis/{*key}", async (string key, IConnectionMultiplexer redis, ILogger<LogsResponse> logger) =>

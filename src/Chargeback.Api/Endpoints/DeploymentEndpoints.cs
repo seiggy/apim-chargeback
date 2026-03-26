@@ -10,6 +10,7 @@ public static class DeploymentEndpoints
         routes.MapGet("/api/deployments", GetDeployments)
             .WithName("GetDeployments")
             .WithDescription("List available Azure OpenAI deployments from the Foundry resource")
+            .RequireAuthorization()
             .Produces<DeploymentsResponse>();
 
         return routes;

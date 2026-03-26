@@ -16,7 +16,7 @@ variable "resource_group_name" {
 variable "sku" {
   description = "SKU of the API Management instance."
   type        = string
-  default     = "Consumption_0"
+  default     = "StandardV2_1"
 }
 
 variable "publisher_email" {
@@ -30,8 +30,9 @@ variable "publisher_name" {
 }
 
 variable "api_spec_url" {
-  description = "URL of the OpenAPI specification for the Azure OpenAI Service API."
+  description = "URL of the OpenAPI specification for the Azure OpenAI Service API. Empty string enables wildcard passthrough."
   type        = string
+  default     = ""
 }
 
 variable "ai_service_endpoint" {
@@ -57,6 +58,11 @@ variable "container_app_id" {
 
 variable "api_app_id" {
   description = "Application (client) ID of the Chargeback API app registration."
+  type        = string
+}
+
+variable "gateway_app_id" {
+  description = "Application (client) ID of the APIM Gateway app registration (multi-tenant, client-facing)."
   type        = string
 }
 

@@ -209,7 +209,7 @@ export function Pricing() {
             <Input
               value={form.modelId}
               onChange={(e) => setForm({ ...form, modelId: e.target.value })}
-              placeholder="e.g. gpt-4o"
+              placeholder="e.g. gpt-4.1"
               disabled={!!editingModelId}
               className="font-mono"
             />

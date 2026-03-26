@@ -14,6 +14,7 @@ public static class UsagePolicyEndpoints
         routes.MapGet("/api/settings/usage-policy", GetUsagePolicy)
             .WithName("GetUsagePolicy")
             .WithDescription("Get usage policy settings for billing cycle and retention")
+            .RequireAuthorization()
             .Produces<UsagePolicySettings>();
 
         routes.MapPut("/api/settings/usage-policy", UpdateUsagePolicy)

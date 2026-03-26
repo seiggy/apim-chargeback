@@ -16,6 +16,7 @@ public static class PlanEndpoints
         routes.MapGet("/api/plans", GetPlans)
             .WithName("GetPlans")
             .WithDescription("List all billing plans")
+            .RequireAuthorization()
             .Produces<PlansResponse>();
 
         routes.MapPost("/api/plans", CreatePlan)
@@ -50,6 +51,7 @@ public static class PlanEndpoints
         routes.MapGet("/api/clients", GetClients)
             .WithName("GetClients")
             .WithDescription("List all client plan assignments with current usage")
+            .RequireAuthorization()
             .Produces<ClientsResponse>();
 
         routes.MapPut("/api/clients/{clientAppId}/{tenantId}", AssignClient)
@@ -80,8 +82,7 @@ public static class PlanEndpoints
         try
         {
             var db = redis.GetDatabase();
-            var server = redis.GetServers().First();
-            var keys = server.Keys(pattern: RedisKeys.PlanPrefix).ToArray();
+            var keys = redis.KeysFromAllServers(RedisKeys.PlanPrefix);
 
             logger.LogInformation("Fetched {KeyCount} plan keys from Redis", keys.Length);
 
@@ -127,9 +128,8 @@ public static class PlanEndpoints
             var id = Guid.NewGuid().ToString("N")[..8];
             var now = DateTime.UtcNow;
             var db = redis.GetDatabase();
-            var server = redis.GetServers().First();
 
-            if (await PlanNameExistsAsync(db, server, normalizedName, logger))
+            if (await PlanNameExistsAsync(db, redis, normalizedName, logger))
                 return Results.Conflict(new { error = $"Plan name '{normalizedName}' already exists" });
 
             var plan = new PlanData
@@ -188,8 +188,7 @@ public static class PlanEndpoints
                     return Results.BadRequest("Plan name is required");
 
                 var normalizedName = NormalizePlanName(body.Name);
-                var server = redis.GetServers().First();
-                if (await PlanNameExistsAsync(db, server, normalizedName, logger, excludedPlanId: planId))
+                if (await PlanNameExistsAsync(db, redis, normalizedName, logger, excludedPlanId: planId))
                     return Results.Conflict(new { error = $"Plan name '{normalizedName}' already exists" });
 
                 plan.Name = normalizedName;
@@ -226,10 +225,9 @@ public static class PlanEndpoints
         try
         {
             var db = redis.GetDatabase();
-            var server = redis.GetServers().First();
             var cacheKey = RedisKeys.Plan(planId);
 
-            var assignedClientIds = await GetAssignedClientIdsAsync(db, server, planId, logger);
+            var assignedClientIds = await GetAssignedClientIdsAsync(db, redis, planId, logger);
             if (assignedClientIds.Count > 0)
             {
                 return Results.Conflict(new
@@ -264,10 +262,9 @@ public static class PlanEndpoints
         try
         {
             var db = redis.GetDatabase();
-            var server = redis.GetServers().First();
             var usagePolicy = await usagePolicyStore.GetAsync(db);
             var expectedPeriodStart = BillingPeriodCalculator.GetCurrentPeriodStartUtc(DateTime.UtcNow, usagePolicy.BillingCycleStartDay);
-            var keys = server.Keys(pattern: RedisKeys.ClientPrefix).ToArray();
+            var keys = redis.KeysFromAllServers(RedisKeys.ClientPrefix);
 
             logger.LogInformation("Fetched {KeyCount} client keys from Redis", keys.Length);
 
@@ -336,14 +333,13 @@ public static class PlanEndpoints
                 return Results.BadRequest("planId is required");
 
             var db = redis.GetDatabase();
-            var server = redis.GetServers().First();
             var usagePolicy = await usagePolicyStore.GetAsync(db);
 
             var planKey = RedisKeys.Plan(body.PlanId);
             if (!await db.KeyExistsAsync(planKey))
                 return Results.BadRequest($"Plan '{body.PlanId}' does not exist");
 
-            var currentUsage = await ComputeUsage(db, server, clientAppId, tenantId, logger);
+            var currentUsage = await ComputeUsage(db, redis, clientAppId, tenantId, logger);
 
             var assignment = new ClientPlanAssignment
             {
@@ -406,12 +402,12 @@ public static class PlanEndpoints
 
     private static async Task<bool> PlanNameExistsAsync(
         IDatabase db,
-        IServer server,
+        IConnectionMultiplexer redis,
         string normalizedName,
         ILogger logger,
         string? excludedPlanId = null)
     {
-        var planKeys = server.Keys(pattern: RedisKeys.PlanPrefix).ToArray();
+        var planKeys = redis.KeysFromAllServers(RedisKeys.PlanPrefix);
         foreach (var planKey in planKeys)
         {
             var planValue = await db.StringGetAsync(planKey);
@@ -443,12 +439,12 @@ public static class PlanEndpoints
 
     private static async Task<List<string>> GetAssignedClientIdsAsync(
         IDatabase db,
-        IServer server,
+        IConnectionMultiplexer redis,
         string planId,
         ILogger logger)
     {
         var assignedClientIds = new List<string>();
-        var clientKeys = server.Keys(pattern: RedisKeys.ClientPrefix).ToArray();
+        var clientKeys = redis.KeysFromAllServers(RedisKeys.ClientPrefix);
 
         foreach (var clientKey in clientKeys)
         {
@@ -474,10 +470,10 @@ public static class PlanEndpoints
         return assignedClientIds;
     }
 
-    private static async Task<long> ComputeUsage(IDatabase db, IServer server, string clientAppId, string tenantId, ILogger logger)
+    private static async Task<long> ComputeUsage(IDatabase db, IConnectionMultiplexer redis, string clientAppId, string tenantId, ILogger logger)
     {
         long usage = 0;
-        var logKeys = server.Keys(pattern: RedisKeys.CustomerLogPattern(clientAppId, tenantId)).ToArray();
+        var logKeys = redis.KeysFromAllServers(RedisKeys.CustomerLogPattern(clientAppId, tenantId));
 
         foreach (var logKey in logKeys)
         {

@@ -30,7 +30,7 @@ variable "secondary_tenant_id" {
 variable "apim_sku" {
   description = "APIM SKU name"
   type        = string
-  default     = "Consumption_0"
+  default     = "StandardV2_1"
 }
 
 variable "apim_publisher_email" {
@@ -45,9 +45,9 @@ variable "apim_publisher_name" {
 }
 
 variable "openai_api_spec_url" {
-  description = "URL to the OpenAI API spec for APIM import"
+  description = "URL to the OpenAI API spec for APIM import. Set to empty string to use passthrough operations only."
   type        = string
-  default     = "https://raw.githubusercontent.com/Azure/azure-rest-api-specs/main/specification/cognitiveservices/data-plane/AzureOpenAI/inference/stable/2024-02-01/inference.json"
+  default     = ""
 }
 
 variable "purview_client_app_id" {
@@ -70,18 +70,18 @@ variable "ai_deployments" {
   }))
   default = [
     {
-      name          = "gpt-4o"
-      model_name    = "gpt-4o"
+      name          = "gpt-4.1"
+      model_name    = "gpt-4.1"
       model_format  = "OpenAI"
-      model_version = "2024-11-20"
+      model_version = "2025-04-14"
       sku_name      = "GlobalStandard"
       sku_capacity  = 10
     },
     {
-      name          = "gpt-4o-mini"
-      model_name    = "gpt-4o-mini"
+      name          = "gpt-4.1-mini"
+      model_name    = "gpt-4.1-mini"
       model_format  = "OpenAI"
-      model_version = "2024-07-18"
+      model_version = "2025-04-14"
       sku_name      = "GlobalStandard"
       sku_capacity  = 5
     },

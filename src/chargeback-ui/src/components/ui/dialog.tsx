@@ -13,7 +13,7 @@ function Dialog({ open, onOpenChange, children }: DialogProps) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" onClick={() => onOpenChange(false)} />
-      <div className="relative z-50 w-full max-w-lg rounded-xl border bg-background p-6 shadow-lg animate-in">
+      <div className="relative z-50 w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-xl border bg-background p-6 shadow-lg animate-in">
         {children}
       </div>
     </div>
