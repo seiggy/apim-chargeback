@@ -77,15 +77,15 @@ See the [Deployment Guide](docs/DOTNET_DEPLOYMENT_GUIDE.md) for full manual step
 # Or configure DemoClient via user secrets
 dotnet user-secrets --project demo init
 dotnet user-secrets --project demo set "DemoClient:TenantId" "<tenant-id>"
-dotnet user-secrets --project demo set "DemoClient:ApiScope" "api://<api-app-id>/.default"
+dotnet user-secrets --project demo set "DemoClient:ApiScope" "api://<gateway-app-id>/.default"
 dotnet user-secrets --project demo set "DemoClient:ApimBase" "https://<apim-name>.azure-api.net"
-dotnet user-secrets --project demo set "DemoClient:ApiVersion" "2024-02-01"
+dotnet user-secrets --project demo set "DemoClient:ApiVersion" "2025-04-01-preview"
 dotnet user-secrets --project demo set "DemoClient:ChargebackBase" "https://<container-app-fqdn>"
 dotnet user-secrets --project demo set "DemoClient:Clients:0:Name" "Enterprise Client"
 dotnet user-secrets --project demo set "DemoClient:Clients:0:AppId" "<client-app-id>"
 dotnet user-secrets --project demo set "DemoClient:Clients:0:Secret" "<client-secret>"
 dotnet user-secrets --project demo set "DemoClient:Clients:0:Plan" "Enterprise"
-dotnet user-secrets --project demo set "DemoClient:Clients:0:DeploymentId" "gpt-4o"
+dotnet user-secrets --project demo set "DemoClient:Clients:0:DeploymentId" "gpt-4.1"
 dotnet user-secrets --project demo set "DemoClient:Clients:0:TenantId" "<tenant-id>"
 
 # Generate synthetic traffic with Agent Framework (1.0.0-rc2) agents
@@ -144,7 +144,7 @@ A single **Azure Container App** (`Chargeback.Api`) hosts all chargeback functio
 | `/ws/logs` | WS | WebSocket endpoint for real-time updates |
 
 **Core Components**:
-- 🔐 **API Management** — Gateway with Entra JWT validation, inbound pre-check, outbound log forwarding
+- 🔐 **API Management** — StandardV2 gateway with Entra JWT validation, inbound pre-check, outbound log forwarding
 - ⚡ **Chargeback.Api** — ASP.NET Minimal API for log ingestion, billing, cost calculation, and dashboard
 - 💾 **Azure Managed Redis** — Hot cache for real-time log data, plan/client assignments, and rate limiting
 - 🔑 **Deployment access control** — Per-plan and per-client deployment allowlists
@@ -166,7 +166,14 @@ The React SPA provides five pages:
 
 ## Authentication
 
-Authentication uses **Entra ID (Azure AD) App Registrations** with JWT bearer tokens. The APIM policy (`policies/entra-jwt-policy.xml`) validates incoming tokens and extracts claims for chargeback routing:
+Authentication uses **Entra ID (Azure AD) App Registrations** with JWT bearer tokens and a **two-app model**:
+
+| App Registration | Audience | Purpose |
+|-----------------|----------|---------|
+| **Chargeback APIM Gateway** (multi-tenant) | `api://{gateway-app-id}` | External clients authenticate against this to call OpenAI via APIM |
+| **Chargeback API** (single-tenant) | `api://{api-app-id}` | Backend API — only APIM's managed identity and dashboard users access this |
+
+The APIM policy (`policies/entra-jwt-policy.xml`) validates incoming tokens against the **Gateway** app audience and extracts claims for chargeback routing:
 
 | JWT Claim | Purpose |
 |-----------|---------|
@@ -189,7 +196,7 @@ All Redis keys, Cosmos DB partition keys, and dashboard views use this combined 
 | Storage | Key Pattern | Example |
 |---------|-------------|---------|
 | **Redis client** | `client:{clientAppId}:{tenantId}` | `client:f5908fef-...9620:99e1e9a1-...c59a` |
-| **Redis usage logs** | `log:{clientAppId}:{tenantId}:{deploymentId}` | `log:f5908fef-...9620:99e1e9a1-...c59a:gpt-4o` |
+| **Redis usage logs** | `log:{clientAppId}:{tenantId}:{deploymentId}` | `log:f5908fef-...9620:99e1e9a1-...c59a:gpt-4.1` |
 | **Redis rate limits** | `ratelimit:rpm:{clientAppId}:{tenantId}:{window}` | `ratelimit:rpm:f5908fef-...9620:99e1e9a1-...c59a:45982` |
 | **Cosmos DB** | Partition key: `/customerKey` | `f5908fef-...9620:99e1e9a1-...c59a` |
 
@@ -240,11 +247,11 @@ The App Registration can then use client credentials flow to obtain a token and 
 ## Usage Example
 
 ```bash
-# Obtain a token from Entra ID
-TOKEN=$(az account get-access-token --resource api://your-app-id --query accessToken -o tsv)
+# Obtain a token from Entra ID (use the Gateway app audience)
+TOKEN=$(az account get-access-token --resource api://your-gateway-app-id --query accessToken -o tsv)
 
 # Call Azure OpenAI through APIM
-curl -X POST https://your-apim.azure-api.net/openai/deployments/gpt-4o/chat/completions \
+curl -X POST https://your-apim.azure-api.net/openai/deployments/gpt-4.1/chat/completions \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"messages": [{"role": "user", "content": "Hello!"}]}'
@@ -331,7 +338,8 @@ infra/
 │   └── register-secondary-tenant.ps1
 scripts/
 ├── setup-azure.ps1                 # Automated Azure deployment script
-├── deploy-container.ps1            # Build and deploy container to ACR
+├── deploy-container.ps1            # Build and deploy container to ACR (also verifies Entra config)
+├── seed-data.ps1                   # Seed plans and client assignments into Redis/Cosmos
 └── deploy-functionapp-test.ps1     # Bicep testing patterns (reference)
 docs/                               # Documentation
 ```
@@ -348,7 +356,7 @@ Infrastructure is defined in Bicep modules under `infra/bicep/`:
 | `appInsights.bicep` | Application Insights + Log Analytics workspace |
 | `logAnalyticsWorkbook.bicep` | Azure Monitor workbook dashboard (Log Analytics KQL) |
 | `redisCache.bicep` | Azure Managed Redis (Balanced_B0) |
-| `apimInstance.bicep` | API Management instance |
+| `apimInstance.bicep` | API Management instance (StandardV2) |
 | `keyVault.bicep` | Azure Key Vault for secrets |
 | `main.bicep` | Orchestrates all modules |
 
@@ -371,10 +379,12 @@ cp terraform.tfvars.sample terraform.tfvars  # Edit with your values
 terraform init
 terraform apply
 
-# Then build and deploy the container
+# Then build and deploy the container (also verifies Entra app config)
 cd ../..
 ./scripts/deploy-container.ps1 -ResourceGroupName rg-chrgbk-eastus2
 ```
+
+> **Note**: The `deploy-container.ps1` script automatically verifies and fixes Entra ID app configuration (identifier URIs, SPA redirect URIs, service principals, and role assignments for the deploying user). This works around known eventual-consistency issues in the AzureAD Terraform provider.
 
 ## Prerequisites
 
@@ -405,15 +415,15 @@ PURVIEW_CLIENT_APP_ID=your-purview-app-id
 # See demo/.env.sample for a copyable template.
 DemoClient__TenantId=<tenant-id>
 DemoClient__SecondaryTenantId=<optional-second-tenant-for-multi-tenant-demo>
-DemoClient__ApiScope=api://<api-app-id>/.default
+DemoClient__ApiScope=api://<gateway-app-id>/.default
 DemoClient__ApimBase=https://<apim-name>.azure-api.net
-DemoClient__ApiVersion=2024-02-01
+DemoClient__ApiVersion=2025-04-01-preview
 DemoClient__ChargebackBase=https://<container-app-fqdn>
 DemoClient__Clients__0__Name=Enterprise Client
 DemoClient__Clients__0__AppId=<client-app-id>
 DemoClient__Clients__0__Secret=<client-secret>
 DemoClient__Clients__0__Plan=Enterprise
-DemoClient__Clients__0__DeploymentId=gpt-4o
+DemoClient__Clients__0__DeploymentId=gpt-4.1
 DemoClient__Clients__0__TenantId=<tenant-id>
 ```
 
