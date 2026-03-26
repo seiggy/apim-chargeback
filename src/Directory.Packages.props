@@ -22,7 +22,7 @@
     <PackageVersion Include="Microsoft.Extensions.Http.Resilience" Version="10.4.0" />
     <PackageVersion Include="Microsoft.Extensions.ServiceDiscovery" Version="10.4.0" />
     <PackageVersion Include="Microsoft.Identity.Client" Version="4.82.1" />
-    <PackageVersion Include="Microsoft.Identity.Web" Version="3.14.1" />
+    <PackageVersion Include="Microsoft.Identity.Web" Version="4.6.0" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
 
     <!-- OpenTelemetry -->
