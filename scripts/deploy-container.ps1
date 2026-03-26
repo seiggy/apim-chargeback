@@ -159,6 +159,35 @@ if (-not [string]::IsNullOrWhiteSpace($gatewayAppId)) {
     }
 }
 
+# ── Deploying user: ensure Admin and Export roles ──
+Write-Host ""
+Write-Host "  Step 1c: Ensuring deployer has Admin and Export roles..." -ForegroundColor Yellow
+
+$currentUserId = az ad signed-in-user show --query "id" -o tsv
+$appRoles = az ad app show --id $apiAppId --query "appRoles[].{id:id,value:value}" -o json | ConvertFrom-Json
+$adminRoleId = ($appRoles | Where-Object { $_.value -eq 'Chargeback.Admin' }).id
+$exportRoleId = ($appRoles | Where-Object { $_.value -eq 'Chargeback.Export' }).id
+
+$existingAssignments = az rest --method GET --uri "https://graph.microsoft.com/v1.0/servicePrincipals/$apiSpId/appRoleAssignedTo" 2>$null | ConvertFrom-Json
+$userAssignments = @($existingAssignments.value | Where-Object { $_.principalId -eq $currentUserId })
+
+foreach ($role in @(@{id=$adminRoleId; name='Chargeback.Admin'}, @{id=$exportRoleId; name='Chargeback.Export'})) {
+    if (-not $role.id) { Write-Host "    ⊘ $($role.name) role not found on app — skipping" -ForegroundColor DarkGray; continue }
+    $hasRole = $userAssignments | Where-Object { $_.appRoleId -eq $role.id }
+    if ($hasRole) {
+        Write-Host "    ✓ $($role.name) role assigned" -ForegroundColor Green
+    } else {
+        Write-Host "    ⚠ $($role.name) role missing — assigning..." -ForegroundColor DarkYellow
+        $body = @{ principalId=$currentUserId; resourceId=$apiSpId; appRoleId=$role.id } | ConvertTo-Json -Compress
+        az rest --method POST --uri "https://graph.microsoft.com/v1.0/servicePrincipals/$apiSpId/appRoleAssignedTo" --headers "Content-Type=application/json" --body $body -o none 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "    ✓ $($role.name) role assigned" -ForegroundColor Green
+        } else {
+            Write-Host "    ⚠ $($role.name) role assignment failed (may already exist)" -ForegroundColor DarkYellow
+        }
+    }
+}
+
 # ── Step 2: Write UI auth config ─────────────────────────────────────
 
 Write-Host ""
